@@ -453,6 +453,135 @@ func TestDiskFileService_Download_ExistingDirectoryTarget_DownloadsIntoDir(t *te
 	}
 }
 
+// TestDiskFileService_Remove_SplitsParentAndName 验证 Remove 将路径拆分为父目录和文件名，
+// 并发送 DELETE 请求到 /api/openApi/diskFile/delete/v1，body 包含文件名数组。
+func TestDiskFileService_Remove_SplitsParentAndName(t *testing.T) {
+	var gotMethod, gotPath, gotUID string
+	var gotNames []string
+
+	// 启动测试服务器，捕获 DELETE 请求的参数和 body
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Query().Get("path")
+		gotUID = r.URL.Query().Get("uid")
+		_ = json.NewDecoder(r.Body).Decode(&gotNames)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 200,
+			"data": nil,
+			"msg":  "OK",
+		})
+	}))
+	defer srv.Close()
+
+	// 构造使用测试服务器的服务图
+	cli := client.NewAPIClient(srv.URL, "ticket-1")
+	paths := NewPathService(func(ctx context.Context) (int64, error) {
+		return 42, nil
+	})
+	svc := NewDiskFileService(cli, paths)
+
+	// 删除 /my/dir 下的 file.txt
+	err := svc.Remove(context.Background(), "private:/my/dir/file.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 验证请求方法为 DELETE
+	if gotMethod != "DELETE" {
+		t.Fatalf("expected method DELETE, got %q", gotMethod)
+	}
+	// 验证 path 参数为父目录
+	if gotPath != "/my/dir" {
+		t.Fatalf("expected path=/my/dir, got %q", gotPath)
+	}
+	// 验证 uid 参数
+	if gotUID != "42" {
+		t.Fatalf("expected uid=42, got %q", gotUID)
+	}
+	// 验证 body 包含文件名数组
+	if len(gotNames) != 1 || gotNames[0] != "file.txt" {
+		t.Fatalf("expected names=[file.txt], got %v", gotNames)
+	}
+}
+
+// TestDiskFileService_Remove_RejectsLocalArea 验证 Remove 拒绝 local 资源域。
+func TestDiskFileService_Remove_RejectsLocalArea(t *testing.T) {
+	cli := client.NewAPIClient("http://localhost:9999", "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	err := svc.Remove(context.Background(), "local:/some/path")
+	if err == nil {
+		t.Fatal("expected error for local area, got nil")
+	}
+	if !strings.Contains(err.Error(), "local") {
+		t.Fatalf("error should mention 'local', got: %s", err.Error())
+	}
+}
+
+// TestDiskFileService_Rename_UsesParentAndOldName 验证 Rename 将路径拆分为父目录和旧名称，
+// 并发送 POST 请求到 /api/openApi/diskFile/rename/v1，body 包含 path、oldName、newName。
+func TestDiskFileService_Rename_UsesParentAndOldName(t *testing.T) {
+	var gotUID string
+	var gotBody map[string]string
+
+	// 启动测试服务器，捕获 POST 请求的 body
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUID = r.URL.Query().Get("uid")
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 200,
+			"data": nil,
+			"msg":  "OK",
+		})
+	}))
+	defer srv.Close()
+
+	// 构造使用测试服务器的服务图
+	cli := client.NewAPIClient(srv.URL, "ticket-1")
+	paths := NewPathService(func(ctx context.Context) (int64, error) {
+		return 42, nil
+	})
+	svc := NewDiskFileService(cli, paths)
+
+	// 重命名 /docs/old.txt 为 new.txt
+	err := svc.Rename(context.Background(), "private:/docs/old.txt", "new.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 验证 uid 参数
+	if gotUID != "42" {
+		t.Fatalf("expected uid=42, got %q", gotUID)
+	}
+	// 验证 body 中的 path 为父目录
+	if gotBody["path"] != "/docs" {
+		t.Fatalf("expected path=/docs, got %q", gotBody["path"])
+	}
+	// 验证 body 包含正确的 oldName 和 newName
+	if gotBody["oldName"] != "old.txt" {
+		t.Fatalf("expected oldName=old.txt, got %q", gotBody["oldName"])
+	}
+	if gotBody["newName"] != "new.txt" {
+		t.Fatalf("expected newName=new.txt, got %q", gotBody["newName"])
+	}
+}
+
+// TestDiskFileService_Rename_RejectsLocalArea 验证 Rename 拒绝 local 资源域。
+func TestDiskFileService_Rename_RejectsLocalArea(t *testing.T) {
+	cli := client.NewAPIClient("http://localhost:9999", "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	err := svc.Rename(context.Background(), "local:/some/path", "newname")
+	if err == nil {
+		t.Fatal("expected error for local area, got nil")
+	}
+	if !strings.Contains(err.Error(), "local") {
+		t.Fatalf("error should mention 'local', got: %s", err.Error())
+	}
+}
+
 // TestDiskFileService_Upload_LocalArea_ReturnsError 验证 Upload 在 local 资源域时返回明确错误。
 func TestDiskFileService_Upload_LocalArea_ReturnsError(t *testing.T) {
 	cli := client.NewAPIClient("http://localhost:9999", "t")

@@ -78,9 +78,14 @@ func (s *PathService) Resolve(ctx context.Context, raw string) (ResolvedPath, er
 		return ResolvedPath{}, fmt.Errorf("路径不能为空，期望格式为 [resourceArea:]<path>")
 	}
 
-	// 规范化路径：补全前缀 /
-	if rawPath[0] != '/' {
-		rawPath = "/" + rawPath
+	// 规范化路径：补全前缀 /（仅限 remote 域），去除末尾多余斜杠（根路径 / 除外）
+	if area != "local" {
+		if rawPath[0] != '/' {
+			rawPath = "/" + rawPath
+		}
+		if len(rawPath) > 1 && rawPath[len(rawPath)-1] == '/' {
+			rawPath = strings.TrimRight(rawPath, "/")
+		}
 	}
 
 	// 根据资源域填充 UID
@@ -103,4 +108,17 @@ func (s *PathService) Resolve(ctx context.Context, raw string) (ResolvedPath, er
 		UID:  uid,
 		Path: rawPath,
 	}, nil
+}
+
+// ParseLocalPath 从原始路径字符串中提取 local 域的本地文件路径。
+// 若输入包含 "local:" 前缀，返回冒号后的部分；否则返回空字符串。
+// 用于在 local 域操作中获取未被路径规范化修改的原始本地路径。
+func (s *PathService) ParseLocalPath(raw string) string {
+	if idx := strings.Index(raw, ":"); idx >= 0 {
+		area := raw[:idx]
+		if area == "local" {
+			return raw[idx+1:]
+		}
+	}
+	return ""
 }

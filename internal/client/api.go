@@ -176,6 +176,26 @@ func (c *APIClient) PostQuery(ctx context.Context, path string, query url.Values
 	return c.doJSONRequest(req, out)
 }
 
+// PostQueryWithBody 向指定路径发送 POST 请求，将 query 编码为 URL 查询参数，
+// 将 body 序列化为 JSON 请求体，并将响应信封中的 data 字段解包到 out。
+// 适用于同时需要查询参数和请求体的 POST 接口（如 rename）。
+func (c *APIClient) PostQueryWithBody(ctx context.Context, path string, query url.Values, body any, out any) error {
+	// 序列化请求体
+	var buf bytes.Buffer
+	if body != nil {
+		if err := json.NewEncoder(&buf).Encode(body); err != nil {
+			return fmt.Errorf("failed to encode request body: %w", err)
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.buildURL(path, query), &buf)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.doJSONRequest(req, out)
+}
+
 // DeleteJSON 向指定路径发送 DELETE 请求，携带可选查询参数和 JSON 请求体，
 // 并将响应信封中的 data 字段解包到 out。
 func (c *APIClient) DeleteJSON(ctx context.Context, path string, query url.Values, body any, out any) error {

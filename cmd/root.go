@@ -58,6 +58,10 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newLSCommand())
 	root.AddCommand(newGetCommand())
 	root.AddCommand(newUploadCommand())
+	root.AddCommand(newRmCommand())
+	root.AddCommand(newRenameCommand())
+	root.AddCommand(newCpCommand())
+	root.AddCommand(newMvCommand())
 
 	return root
 }

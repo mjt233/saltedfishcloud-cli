@@ -92,7 +92,7 @@ func (s *DiskFileService) listByResolved(ctx context.Context, rp ResolvedPath) (
 //
 // remotePath 支持 [resourceArea:]<path> 格式，域可为 private 或 public；local 域不支持，返回明确错误。
 // localPath 是本地目标路径：若远端是文件，localPath 为目标文件路径；若远端是目录，localPath 为目标目录路径。
-// out 用于输出进度信息等用户可见内容。
+// out 用于输出进度信息等用户可见内容，为 nil 时进度信息将被丢弃。
 //
 // 文件与目录的检测策略：先尝试列出 remotePath；若列表成功，视为目录递归下载；若列表失败，视为文件直接下载。
 func (s *DiskFileService) Download(ctx context.Context, remotePath, localPath string, out io.Writer) error {
@@ -105,6 +105,11 @@ func (s *DiskFileService) Download(ctx context.Context, remotePath, localPath st
 	// local 域不支持远端下载
 	if rp.Area == "local" {
 		return fmt.Errorf("local 资源域不支持远端下载操作，请使用 private 或 public 域")
+	}
+
+	// 确保 out 不为 nil，避免进度条写入 panic
+	if out == nil {
+		out = io.Discard
 	}
 
 	// 尝试列出路径内容；若成功则视为目录，否则检查错误类型
@@ -227,6 +232,78 @@ func (s *DiskFileService) downloadDir(ctx context.Context, rp ResolvedPath, loca
 	return nil
 }
 
+// Remove 删除远端路径对应的文件或目录。
+// rawPath 支持 [resourceArea:]<path> 格式，域可为 private 或 public。
+// 内部将路径拆分为父目录和文件名，调用 /api/openApi/diskFile/delete/v1。
+func (s *DiskFileService) Remove(ctx context.Context, rawPath string) error {
+	// 解析资源路径，获取域、uid 和规范化路径
+	rp, err := s.paths.Resolve(ctx, rawPath)
+	if err != nil {
+		return err
+	}
+
+	// local 域不走远端接口
+	if rp.Area == "local" {
+		return fmt.Errorf("local 资源域不支持远端删除操作，请使用 private 或 public 域")
+	}
+
+	// 拆分路径为父目录和文件名
+	dirPath := path.Dir(rp.Path)
+	fileName := path.Base(rp.Path)
+
+	// 构造查询参数
+	q := url.Values{
+		"uid":  {strconv.FormatInt(rp.UID, 10)},
+		"path": {dirPath},
+	}
+
+	// 发送 DELETE 请求，body 包含文件名数组
+	names := []string{fileName}
+	if err := s.client.DeleteJSON(ctx, "/api/openApi/diskFile/delete/v1", q, names, nil); err != nil {
+		return fmt.Errorf("删除 %q 失败: %w", rp.Path, err)
+	}
+	return nil
+}
+
+// Rename 重命名远端路径对应的文件或目录。
+// rawPath 是源路径，newName 是新名称（不含路径）。
+// 内部将路径拆分为父目录和旧名称，调用 /api/openApi/diskFile/rename/v1，
+// 请求体包含 path、oldName、newName 字段。
+func (s *DiskFileService) Rename(ctx context.Context, rawPath, newName string) error {
+	// 解析资源路径，获取域、uid 和规范化路径
+	rp, err := s.paths.Resolve(ctx, rawPath)
+	if err != nil {
+		return err
+	}
+
+	// local 域不走远端接口
+	if rp.Area == "local" {
+		return fmt.Errorf("local 资源域不支持远端重命名操作，请使用 private 或 public 域")
+	}
+
+	// 拆分路径为父目录和旧名称
+	dirPath := path.Dir(rp.Path)
+	oldName := path.Base(rp.Path)
+
+	// 构造请求体（uid 通过查询参数传递）
+	body := map[string]string{
+		"path":    dirPath,
+		"oldName": oldName,
+		"newName": newName,
+	}
+
+	// 构造查询参数（uid 通过查询参数传递）
+	q := url.Values{
+		"uid": {strconv.FormatInt(rp.UID, 10)},
+	}
+
+	// 发送 POST 请求到重命名接口，同时携带查询参数和 JSON body
+	if err := s.client.PostQueryWithBody(ctx, "/api/openApi/diskFile/rename/v1", q, body, nil); err != nil {
+		return fmt.Errorf("重命名 %q 为 %q 失败: %w", rp.Path, newName, err)
+	}
+	return nil
+}
+
 // Upload 将本地路径对应的文件或目录上传到远端资源路径。
 //
 // localPath 是本地文件或目录路径；remotePath 支持 [resourceArea:]<path> 格式，
@@ -234,7 +311,7 @@ func (s *DiskFileService) downloadDir(ctx context.Context, rp ResolvedPath, loca
 // 若 localPath 不存在，返回清晰的错误信息。
 // 单文件上传：remotePath 指定远端目标文件路径（父目录 + 文件名）。
 // 目录上传：remotePath 指定远端目标目录，递归创建子目录并上传所有文件。
-// out 用于输出进度信息等用户可见内容。
+// out 用于输出进度信息等用户可见内容，为 nil 时进度信息将被丢弃。
 func (s *DiskFileService) Upload(ctx context.Context, localPath, remotePath string, out io.Writer) error {
 	// 解析远端路径，获取域、uid 和规范化路径
 	rp, err := s.paths.Resolve(ctx, remotePath)
@@ -245,6 +322,11 @@ func (s *DiskFileService) Upload(ctx context.Context, localPath, remotePath stri
 	// local 域不支持远端上传操作
 	if rp.Area == "local" {
 		return fmt.Errorf("local 资源域不支持远端上传操作，请使用 private 或 public 域")
+	}
+
+	// 确保 out 不为 nil，避免进度条写入 panic
+	if out == nil {
+		out = io.Discard
 	}
 
 	// 检查本地路径是否存在
