@@ -20,16 +20,16 @@
 
 ### 2. 账号认证
 
-#### 手动配置 AccessToken
+#### 手动配置永久有效的 ApiTicket
 
-- 方式1：配置环境变量`SFC_ACCESS_TOKEN`
-- 方式2：使用命令行参数`--access-token=<accessToken>`手动指定
+- 方式1：配置环境变量`SFC_API_TICKET`
+- 方式2：使用命令行参数`--api-ticket=<apiTicket>`手动指定
 - 方式3：手动修改配置文件
   文件配置: `~/.config/sfc-cli/config.json`（如果没有可手动创建）
   配置内容：
-  ```jsonv-
+  ```json
   {
-    "accessToken": "your access token"
+    "apiTicket": "your permanent api ticket"
   }
   ```
 
@@ -39,7 +39,7 @@
 命令格式参考：
 ```
 sfc-cli
-  [--access-token=<accessToken>]
+  [--api-ticket=<apiTicket>]
   [--service-url=<serviceUrl>]
   <command> [<args>]
 ```
