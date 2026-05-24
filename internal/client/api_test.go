@@ -185,6 +185,27 @@ func TestDownload_ReturnsRawResponse(t *testing.T) {
 	}
 }
 
+// TestDownload_ReturnsErrorOnHTTPStatus4xx 验证 Download 在 HTTP 状态码 >= 400 时直接返回错误。
+func TestDownload_ReturnsErrorOnHTTPStatus4xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("forbidden"))
+	}))
+	defer srv.Close()
+
+	cli := NewAPIClient(srv.URL, "t")
+	resp, err := cli.Download(context.Background(), "/api/openApi/diskFile/download/v1", nil)
+	if err == nil {
+		if resp != nil {
+			resp.Body.Close()
+		}
+		t.Fatal("expected error for HTTP 403 response, got nil")
+	}
+	if !strings.Contains(err.Error(), "403") {
+		t.Fatalf("error should mention HTTP status 403, got: %s", err.Error())
+	}
+}
+
 // TestNewAPIClient_NormalizesTrailingSlash 验证 NewAPIClient 去除 baseURL 末尾的斜杠。
 func TestNewAPIClient_NormalizesTrailingSlash(t *testing.T) {
 	called := false
@@ -257,6 +278,24 @@ func TestDoJSON_HTTP4xxReturnsErrorBeforeDecoding(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "401") {
 		t.Fatalf("error should mention HTTP status 401, got: %s", err.Error())
+	}
+}
+
+// TestGetFeatureVersion_ReturnsErrorOnHTTPStatus4xx 验证 GetFeatureVersion 在 HTTP 状态码 >= 400 时先返回错误。
+func TestGetFeatureVersion_ReturnsErrorOnHTTPStatus4xx(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("internal error"))
+	}))
+	defer srv.Close()
+
+	cli := NewAPIClient(srv.URL, "")
+	version, err := cli.GetFeatureVersion(context.Background())
+	if err == nil {
+		t.Fatalf("expected error for HTTP 500 response, got version=%q", version)
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("error should mention HTTP status 500, got: %s", err.Error())
 	}
 }
 

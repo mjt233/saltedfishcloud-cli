@@ -65,6 +65,14 @@ func (c *APIClient) buildURL(path string, query url.Values) string {
 	return u
 }
 
+// checkHTTPStatus 在响应状态码 >= 400 时返回错误。
+func checkHTTPStatus(resp *http.Response) error {
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("http error %d: %s", resp.StatusCode, resp.Status)
+	}
+	return nil
+}
+
 // doJSONRequest 执行 HTTP 请求并将标准信封响应解包到 out。
 // 处理顺序：先检查 HTTP 状态码（>= 400 直接报错），再检查 businessCode，
 // 最后检查 code 是否为 200。businessCode 非零时返回业务错误；
@@ -80,9 +88,8 @@ func (c *APIClient) doJSONRequest(req *http.Request, out any) error {
 	}
 	defer resp.Body.Close()
 
-	// HTTP 状态码 >= 400 时直接返回错误，不尝试解析 JSON 信封（可能来自网关/代理）
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("http error %d: %s", resp.StatusCode, resp.Status)
+	if err := checkHTTPStatus(resp); err != nil {
+		return err
 	}
 
 	// 解析标准信封
@@ -169,6 +176,7 @@ func (c *APIClient) DeleteJSON(ctx context.Context, path string, query url.Value
 // fileField 为表单字段名，fileName 为文件名，reader 为文件内容来源。
 func (c *APIClient) UploadFile(ctx context.Context, path string, query url.Values, fileField, fileName string, reader io.Reader, out any) error {
 	// 构造 multipart 请求体
+	// 当前实现会把 multipart body 缓存在内存中，后续可改为流式写入优化大文件上传。
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 
@@ -209,6 +217,10 @@ func (c *APIClient) Download(ctx context.Context, path string, query url.Values)
 	if err != nil {
 		return nil, fmt.Errorf("http request failed: %w", err)
 	}
+	if err := checkHTTPStatus(resp); err != nil {
+		resp.Body.Close()
+		return nil, err
+	}
 	return resp, nil
 }
 
@@ -232,6 +244,10 @@ func (c *APIClient) GetFeatureVersion(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("http request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if err := checkHTTPStatus(resp); err != nil {
+		return "", err
+	}
 
 	// 直接解析顶层 version 字段
 	var result featureVersionResponse
