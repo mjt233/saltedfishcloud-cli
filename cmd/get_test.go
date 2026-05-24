@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -229,5 +230,46 @@ func TestGetCommand_DefaultLocalName_DerivedFromResolvedPath(t *testing.T) {
 	expectedFile := filepath.Join(base, "remote-name.bin")
 	if _, statErr := os.Stat(expectedFile); statErr != nil {
 		t.Fatalf("expected file at %s, got: %v", expectedFile, statErr)
+	}
+}
+
+// TestGetCommand_DefaultLocalName_RejectsUnsafeRootPath 验证当远端路径无法推导安全默认文件名时，
+// get 命令会要求用户显式指定本地目标路径。
+func TestGetCommand_DefaultLocalName_RejectsUnsafeRootPath(t *testing.T) {
+	apiTicket = ""
+	serviceURL = ""
+	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/openApi/diskFile/fileList/v1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code":         200,
+				"businessCode": 40001,
+				"msg":          "path is not a directory",
+				"data":         nil,
+			})
+		case "/api/openApi/diskFile/download/v1":
+			_, _ = w.Write([]byte("content"))
+		}
+	}))
+	defer srv.Close()
+
+	root := NewRootCommand()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{
+		"--service-url", srv.URL,
+		"--api-ticket", "test-ticket",
+		"get", "public:/",
+	})
+
+	err := root.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("expected error for unsafe default local path, got nil")
+	}
+	if !strings.Contains(err.Error(), "显式指定 localPath") {
+		t.Fatalf("error should request explicit localPath, got: %s", err.Error())
 	}
 }

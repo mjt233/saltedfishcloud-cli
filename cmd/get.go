@@ -46,6 +46,9 @@ func newGetCommand() *cobra.Command {
 					return err
 				}
 				localPath = path.Base(rp.Path)
+				if localPath == "/" || localPath == "." || localPath == "" {
+					return fmt.Errorf("无法为远端路径 %q 推导默认本地目标，请显式指定 localPath", rp.Path)
+				}
 			}
 
 			// 执行下载（文件或目录均由 Download 内部检测处理）

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -350,6 +351,58 @@ func TestDiskFileService_Download_PartialFileCleanedUpOnFailure(t *testing.T) {
 	// 验证不完整文件已被删除，不遗留损坏数据
 	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
 		t.Fatalf("partial file should be cleaned up on failure, but it still exists at %s", target)
+	}
+}
+
+// TestDiskFileService_Download_PartialFileCleanupFailureIsReported 验证当下载失败且清理失败时，
+// 返回错误会同时包含写入失败和清理失败信息。
+func TestDiskFileService_Download_PartialFileCleanupFailureIsReported(t *testing.T) {
+	oldRemoveLocalFile := removeLocalFile
+	removeLocalFile = func(path string) error {
+		return errors.New("remove failed")
+	}
+	t.Cleanup(func() { removeLocalFile = oldRemoveLocalFile })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/openApi/diskFile/fileList/v1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code":         200,
+				"businessCode": 40001,
+				"msg":          "path is not a directory",
+				"data":         nil,
+			})
+		case "/api/openApi/diskFile/download/v1":
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "hijacking unsupported", http.StatusInternalServerError)
+				return
+			}
+			conn, bufW, _ := hj.Hijack()
+			_, _ = bufW.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 100\r\n\r\npartial")
+			_ = bufW.Flush()
+			conn.Close()
+		}
+	}))
+	defer srv.Close()
+
+	cli := client.NewAPIClient(srv.URL, "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	base := t.TempDir()
+	target := filepath.Join(base, "partial.bin")
+
+	var buf bytes.Buffer
+	err := svc.Download(context.Background(), "public:/file.bin", target, &buf)
+	if err == nil {
+		t.Fatal("expected error for interrupted download, got nil")
+	}
+	if !strings.Contains(err.Error(), "清理不完整文件") {
+		t.Fatalf("error should mention cleanup failure, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "remove failed") {
+		t.Fatalf("error should include underlying cleanup failure, got: %s", err.Error())
 	}
 }
 

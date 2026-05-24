@@ -19,6 +19,9 @@ import (
 	"github.com/mjt233/saltedfishcloud-cli/internal/localfs"
 )
 
+// removeLocalFile 允许在测试中替换不完整下载文件的清理行为。
+var removeLocalFile = os.Remove
+
 // DiskEntry 表示远端磁盘上的一个文件或目录条目的元数据信息。
 type DiskEntry struct {
 	// Name 是文件或目录名称。
@@ -126,7 +129,7 @@ func (s *DiskFileService) Download(ctx context.Context, remotePath, localPath st
 // 若 Content-Length 可用，会通过进度条展示下载进度。
 // 若 localPath 已是目录，文件将下载到该目录下以远端文件基础名命名的路径。
 // 若写入过程中出现错误，已创建的不完整文件会被自动删除。
-func (s *DiskFileService) downloadFile(ctx context.Context, rp ResolvedPath, localPath string, out io.Writer) error {
+func (s *DiskFileService) downloadFile(ctx context.Context, rp ResolvedPath, localPath string, out io.Writer) (err error) {
 	// 若 localPath 已是目录，将文件下载到该目录下以远端文件基础名命名的文件
 	if fi, statErr := os.Stat(localPath); statErr == nil && fi.IsDir() {
 		localPath = filepath.Join(localPath, path.Base(rp.Path))
@@ -162,7 +165,9 @@ func (s *DiskFileService) downloadFile(ctx context.Context, rp ResolvedPath, loc
 		f.Close()
 		if !copyOK {
 			// 下载失败时删除已创建的不完整文件，避免遗留损坏数据
-			_ = os.Remove(localPath)
+			if removeErr := removeLocalFile(localPath); removeErr != nil {
+				err = errors.Join(err, fmt.Errorf("清理不完整文件 %q 失败: %w", localPath, removeErr))
+			}
 		}
 	}()
 
