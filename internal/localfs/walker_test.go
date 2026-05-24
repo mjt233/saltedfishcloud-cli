@@ -56,3 +56,128 @@ func TestEnsureParentDir_NoParent_NoError(t *testing.T) {
 		t.Fatalf("unexpected error for flat path: %v", err)
 	}
 }
+
+// TestWalk_NonExistent_ReturnsError 验证对不存在的路径调用 Walk 时返回明确错误。
+func TestWalk_NonExistent_ReturnsError(t *testing.T) {
+	_, err := localfs.Walk(filepath.Join(t.TempDir(), "nonexistent.txt"))
+	if err == nil {
+		t.Fatal("expected error for non-existent path, got nil")
+	}
+}
+
+// TestWalk_SingleFile_ReturnsSingleEntry 验证对单个文件调用 Walk 时返回一个非目录条目，
+// RelativePath 为文件基础名，AbsolutePath 为文件绝对路径。
+func TestWalk_SingleFile_ReturnsSingleEntry(t *testing.T) {
+	base := t.TempDir()
+	filePath := filepath.Join(base, "hello.txt")
+	if err := os.WriteFile(filePath, []byte("content"), 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	entries, err := localfs.Walk(filePath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 单文件应返回恰好一个条目
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	e := entries[0]
+	if e.IsDir {
+		t.Fatal("expected IsDir=false for file entry")
+	}
+	// RelativePath 应为文件基础名
+	if e.RelativePath != "hello.txt" {
+		t.Fatalf("expected RelativePath=%q, got %q", "hello.txt", e.RelativePath)
+	}
+	// AbsolutePath 应指向文件本身
+	if e.AbsolutePath != filePath {
+		t.Fatalf("expected AbsolutePath=%q, got %q", filePath, e.AbsolutePath)
+	}
+}
+
+// TestWalk_Directory_IncludesAllEntriesWithRelativePaths 验证对目录调用 Walk 时，
+// 返回所有文件和子目录条目，RelativePath 相对于 root 计算，不包含 root 本身。
+func TestWalk_Directory_IncludesAllEntriesWithRelativePaths(t *testing.T) {
+	base := t.TempDir()
+
+	// 创建目录结构：base/a.txt, base/sub/(dir), base/sub/b.txt
+	if err := os.WriteFile(filepath.Join(base, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatalf("failed to create a.txt: %v", err)
+	}
+	subDir := filepath.Join(base, "sub")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("failed to create sub dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "b.txt"), []byte("b"), 0644); err != nil {
+		t.Fatalf("failed to create b.txt: %v", err)
+	}
+
+	entries, err := localfs.Walk(base)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 预期 3 个条目：a.txt, sub, sub/b.txt（不含 root 本身）
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d: %v", len(entries), entries)
+	}
+
+	// 用 map 方便按 RelativePath 查找
+	byRel := make(map[string]localfs.WalkEntry)
+	for _, e := range entries {
+		byRel[e.RelativePath] = e
+	}
+
+	// 验证 a.txt 存在且为文件
+	if e, ok := byRel["a.txt"]; !ok || e.IsDir {
+		t.Fatalf("expected file entry for a.txt, got: %v, ok=%v", byRel["a.txt"], ok)
+	}
+	// 验证 sub 存在且为目录
+	if e, ok := byRel["sub"]; !ok || !e.IsDir {
+		t.Fatalf("expected dir entry for sub, got: %v, ok=%v", byRel["sub"], ok)
+	}
+	// 验证 sub/b.txt 存在（使用 OS 原生路径分隔符）
+	subBTxt := filepath.Join("sub", "b.txt")
+	if e, ok := byRel[subBTxt]; !ok || e.IsDir {
+		t.Fatalf("expected file entry for %s, got: %v, ok=%v", subBTxt, byRel[subBTxt], ok)
+	}
+}
+
+// TestWalk_Directory_DirsAppearBeforeContents 验证目录条目在其内容之前出现，
+// 以确保 mkdir 编排时父目录先于子条目被处理。
+func TestWalk_Directory_DirsAppearBeforeContents(t *testing.T) {
+	base := t.TempDir()
+	subDir := filepath.Join(base, "sub")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("failed to create sub dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("f"), 0644); err != nil {
+		t.Fatalf("failed to create file.txt: %v", err)
+	}
+
+	entries, err := localfs.Walk(base)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 找出 sub 和 sub/file.txt 的位置
+	subIdx, fileIdx := -1, -1
+	subFile := filepath.Join("sub", "file.txt")
+	for i, e := range entries {
+		if e.RelativePath == "sub" {
+			subIdx = i
+		}
+		if e.RelativePath == subFile {
+			fileIdx = i
+		}
+	}
+	if subIdx == -1 || fileIdx == -1 {
+		t.Fatalf("missing expected entries; got: %v", entries)
+	}
+	// 目录必须先于其子文件出现
+	if subIdx >= fileIdx {
+		t.Fatalf("expected sub (idx=%d) to appear before sub/file.txt (idx=%d)", subIdx, fileIdx)
+	}
+}

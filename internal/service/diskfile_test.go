@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -449,5 +450,190 @@ func TestDiskFileService_Download_ExistingDirectoryTarget_DownloadsIntoDir(t *te
 	}
 	if string(content) != "file-content" {
 		t.Fatalf("expected content %q, got %q", "file-content", string(content))
+	}
+}
+
+// TestDiskFileService_Upload_LocalArea_ReturnsError 验证 Upload 在 local 资源域时返回明确错误。
+func TestDiskFileService_Upload_LocalArea_ReturnsError(t *testing.T) {
+	cli := client.NewAPIClient("http://localhost:9999", "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	var buf bytes.Buffer
+	err := svc.Upload(context.Background(), ".", "local:/some/path", &buf)
+	if err == nil {
+		t.Fatal("expected error for local area, got nil")
+	}
+	// 错误信息中应包含 "local" 关键字
+	if !strings.Contains(err.Error(), "local") {
+		t.Fatalf("error should mention 'local', got: %s", err.Error())
+	}
+}
+
+// TestDiskFileService_Upload_NonExistentLocal_ReturnsError 验证本地路径不存在时 Upload 返回明确错误。
+func TestDiskFileService_Upload_NonExistentLocal_ReturnsError(t *testing.T) {
+	cli := client.NewAPIClient("http://localhost:9999", "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	var buf bytes.Buffer
+	nonExistent := filepath.Join(t.TempDir(), "no_such_file.txt")
+	err := svc.Upload(context.Background(), nonExistent, "public:/dest/file.txt", &buf)
+	if err == nil {
+		t.Fatal("expected error for non-existent local path, got nil")
+	}
+}
+
+// TestDiskFileService_Upload_SingleFile_HitsUploadEndpoint 验证单文件上传调用 /upload/v1 接口，
+// 并将正确的 uid、path 查询参数和文件内容发送到后端。
+func TestDiskFileService_Upload_SingleFile_HitsUploadEndpoint(t *testing.T) {
+	var gotUID, gotPath, gotFileName string
+	var gotContent []byte
+
+	// 启动测试服务器，捕获上传请求的参数和内容
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/openApi/diskFile/upload/v1" {
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusBadRequest)
+			return
+		}
+		// 读取查询参数
+		gotUID = r.URL.Query().Get("uid")
+		gotPath = r.URL.Query().Get("path")
+
+		// 解析 multipart body，读取文件字段
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			http.Error(w, "parse multipart failed: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if fh := r.MultipartForm.File["file"]; len(fh) > 0 {
+			gotFileName = fh[0].Filename
+			f, _ := fh[0].Open()
+			defer f.Close()
+			gotContent, _ = io.ReadAll(f)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": nil, "msg": "OK"})
+	}))
+	defer srv.Close()
+
+	// 在临时目录中创建待上传的本地文件
+	base := t.TempDir()
+	localFile := filepath.Join(base, "myfile.txt")
+	if err := os.WriteFile(localFile, []byte("upload-content"), 0644); err != nil {
+		t.Fatalf("failed to create local file: %v", err)
+	}
+
+	// 构造使用测试服务器的服务图；public 域 uid 固定为 0
+	cli := client.NewAPIClient(srv.URL, "ticket-1")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	var buf bytes.Buffer
+	// 远端路径指定到具体文件，期望上传到父目录 /dest 并使用文件名 report.txt
+	if err := svc.Upload(context.Background(), localFile, "public:/dest/report.txt", &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 验证查询参数
+	if gotUID != "0" {
+		t.Fatalf("expected uid=0, got %q", gotUID)
+	}
+	// path 应为远端父目录
+	if gotPath != "/dest" {
+		t.Fatalf("expected path=/dest, got %q", gotPath)
+	}
+	// 文件名应取自远端路径基础名
+	if gotFileName != "report.txt" {
+		t.Fatalf("expected fileName=report.txt, got %q", gotFileName)
+	}
+	// 文件内容应与本地文件一致
+	if string(gotContent) != "upload-content" {
+		t.Fatalf("expected content=%q, got %q", "upload-content", string(gotContent))
+	}
+}
+
+// TestDiskFileService_Upload_Directory_CreatesDirsBeforeUploadingFiles 验证目录上传先通过
+// /mkdir/v1 创建远端子目录，再通过 /upload/v1 上传嵌套文件，且顺序正确。
+func TestDiskFileService_Upload_Directory_CreatesDirsBeforeUploadingFiles(t *testing.T) {
+	// seq 记录服务端接收请求的顺序
+	var seq []string
+	var mkdirUID, mkdirPath, mkdirName string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/openApi/diskFile/mkdir/v1":
+			// 记录 mkdir 调用及顺序
+			mkdirUID = r.URL.Query().Get("uid")
+			mkdirPath = r.URL.Query().Get("path")
+			mkdirName = r.URL.Query().Get("name")
+			seq = append(seq, "mkdir:"+mkdirName)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": nil, "msg": "OK"})
+		case "/api/openApi/diskFile/upload/v1":
+			// 记录 upload 调用的文件名及顺序
+			if err := r.ParseMultipartForm(1 << 20); err == nil {
+				if fh := r.MultipartForm.File["file"]; len(fh) > 0 {
+					seq = append(seq, "upload:"+fh[0].Filename)
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": nil, "msg": "OK"})
+		default:
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	// 创建本地目录结构：root/top.txt, root/sub/, root/sub/nested.txt
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "top.txt"), []byte("top"), 0644); err != nil {
+		t.Fatalf("failed to create top.txt: %v", err)
+	}
+	subDir := filepath.Join(root, "sub")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("failed to create sub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "nested.txt"), []byte("nested"), 0644); err != nil {
+		t.Fatalf("failed to create nested.txt: %v", err)
+	}
+
+	cli := client.NewAPIClient(srv.URL, "ticket-1")
+	// private uid = 42
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 42, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	var buf bytes.Buffer
+	if err := svc.Upload(context.Background(), root, "private:/remote", &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 验证 mkdir 被调用且参数正确
+	if mkdirUID != "42" {
+		t.Fatalf("expected mkdir uid=42, got %q", mkdirUID)
+	}
+	if mkdirPath != "/remote" {
+		t.Fatalf("expected mkdir path=/remote, got %q", mkdirPath)
+	}
+	if mkdirName != "sub" {
+		t.Fatalf("expected mkdir name=sub, got %q", mkdirName)
+	}
+
+	// 找到 mkdir:sub 和 upload:nested.txt 在序列中的位置
+	mkdirIdx, nestedIdx := -1, -1
+	for i, s := range seq {
+		if s == "mkdir:sub" {
+			mkdirIdx = i
+		}
+		if s == "upload:nested.txt" {
+			nestedIdx = i
+		}
+	}
+	if mkdirIdx == -1 {
+		t.Fatalf("mkdir:sub not found in call sequence: %v", seq)
+	}
+	if nestedIdx == -1 {
+		t.Fatalf("upload:nested.txt not found in call sequence: %v", seq)
+	}
+	// mkdir 必须在嵌套文件上传之前调用
+	if mkdirIdx >= nestedIdx {
+		t.Fatalf("expected mkdir:sub (idx=%d) before upload:nested.txt (idx=%d); seq=%v",
+			mkdirIdx, nestedIdx, seq)
 	}
 }

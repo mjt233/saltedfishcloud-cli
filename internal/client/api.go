@@ -165,6 +165,17 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 	return c.doJSONRequest(req, out)
 }
 
+// PostQuery 向指定路径发送不含请求体的 POST 请求，将 query 编码为 URL 查询参数，
+// 并将响应信封中的 data 字段解包到 out。
+// 适用于参数较简单、直接通过 URL 传递的 POST 接口（如 mkdir）。
+func (c *APIClient) PostQuery(ctx context.Context, path string, query url.Values, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.buildURL(path, query), nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	return c.doJSONRequest(req, out)
+}
+
 // DeleteJSON 向指定路径发送 DELETE 请求，携带可选查询参数和 JSON 请求体，
 // 并将响应信封中的 data 字段解包到 out。
 func (c *APIClient) DeleteJSON(ctx context.Context, path string, query url.Values, body any, out any) error {

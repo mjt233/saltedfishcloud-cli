@@ -226,3 +226,134 @@ func (s *DiskFileService) downloadDir(ctx context.Context, rp ResolvedPath, loca
 	}
 	return nil
 }
+
+// Upload 将本地路径对应的文件或目录上传到远端资源路径。
+//
+// localPath 是本地文件或目录路径；remotePath 支持 [resourceArea:]<path> 格式，
+// 域可为 private 或 public；local 域不支持，返回明确错误。
+// 若 localPath 不存在，返回清晰的错误信息。
+// 单文件上传：remotePath 指定远端目标文件路径（父目录 + 文件名）。
+// 目录上传：remotePath 指定远端目标目录，递归创建子目录并上传所有文件。
+// out 用于输出进度信息等用户可见内容。
+func (s *DiskFileService) Upload(ctx context.Context, localPath, remotePath string, out io.Writer) error {
+	// 解析远端路径，获取域、uid 和规范化路径
+	rp, err := s.paths.Resolve(ctx, remotePath)
+	if err != nil {
+		return err
+	}
+
+	// local 域不支持远端上传操作
+	if rp.Area == "local" {
+		return fmt.Errorf("local 资源域不支持远端上传操作，请使用 private 或 public 域")
+	}
+
+	// 检查本地路径是否存在
+	localInfo, err := os.Stat(localPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("本地路径 %q 不存在", localPath)
+		}
+		return fmt.Errorf("读取本地路径 %q 失败: %w", localPath, err)
+	}
+
+	// 根据本地路径类型分别处理
+	if localInfo.IsDir() {
+		// 目录上传：遍历本地目录并递归编排 mkdir + upload
+		return s.uploadDir(ctx, localPath, rp, out)
+	}
+	// 单文件上传
+	return s.uploadSingleFile(ctx, localPath, rp, out)
+}
+
+// uploadSingleFile 将单个本地文件上传到远端路径。
+// rp.Path 的基础名用作上传文件名，父目录作为 path 查询参数。
+// 若文件大小可知，通过进度条展示上传进度。
+func (s *DiskFileService) uploadSingleFile(ctx context.Context, localPath string, rp ResolvedPath, out io.Writer) error {
+	// 打开本地文件
+	f, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("打开文件 %q 失败: %w", localPath, err)
+	}
+	defer f.Close()
+
+	// 从远端路径中提取文件名和父目录
+	fileName := path.Base(rp.Path)
+	dirPath := path.Dir(rp.Path)
+
+	// 获取文件大小以初始化进度条（失败时以 -1 表示未知大小）
+	var fileSize int64 = -1
+	if fi, statErr := f.Stat(); statErr == nil {
+		fileSize = fi.Size()
+	}
+
+	// 构造进度条，展示上传进度
+	bar := progressbar.NewOptions64(
+		fileSize,
+		progressbar.OptionSetWriter(out),
+		progressbar.OptionSetDescription(fileName),
+		progressbar.OptionShowBytes(true),
+	)
+
+	// 构造上传接口查询参数
+	q := url.Values{
+		"uid":  {strconv.FormatInt(rp.UID, 10)},
+		"path": {dirPath},
+	}
+
+	// 上传文件，同步更新进度条
+	reader := io.TeeReader(f, bar)
+	if err := s.client.UploadFile(ctx, "/api/openApi/diskFile/upload/v1", q, "file", fileName, reader, nil); err != nil {
+		return fmt.Errorf("上传文件 %q 失败: %w", localPath, err)
+	}
+	_ = bar.Finish()
+	return nil
+}
+
+// mkdir 调用后端接口在远端创建目录。
+// rp.Path 的基础名为要创建的目录名，父目录作为 path 查询参数。
+func (s *DiskFileService) mkdir(ctx context.Context, rp ResolvedPath) error {
+	q := url.Values{
+		"uid":  {strconv.FormatInt(rp.UID, 10)},
+		"path": {path.Dir(rp.Path)},
+		"name": {path.Base(rp.Path)},
+	}
+	if err := s.client.PostQuery(ctx, "/api/openApi/diskFile/mkdir/v1", q, nil); err != nil {
+		return fmt.Errorf("创建远端目录 %q 失败: %w", rp.Path, err)
+	}
+	return nil
+}
+
+// uploadDir 递归将本地目录上传到远端目录。
+// 使用 localfs.Walk 遍历本地目录，按条目顺序（目录先于内容）先创建远端子目录，
+// 再上传各个文件，确保父目录在上传子文件前已存在。
+func (s *DiskFileService) uploadDir(ctx context.Context, localPath string, rp ResolvedPath, out io.Writer) error {
+	// 获取本地目录的所有条目（目录先于其内容出现）
+	entries, err := localfs.Walk(localPath)
+	if err != nil {
+		return fmt.Errorf("遍历本地目录 %q 失败: %w", localPath, err)
+	}
+
+	// 遍历条目，按顺序执行 mkdir（目录）或 upload（文件）
+	for _, entry := range entries {
+		// 将 OS 原生路径分隔符转为正斜杠，用于构造远端路径
+		relRemote := filepath.ToSlash(entry.RelativePath)
+		entryRp := ResolvedPath{
+			Area: rp.Area,
+			UID:  rp.UID,
+			Path: path.Join(rp.Path, relRemote),
+		}
+
+		if entry.IsDir {
+			// 先创建远端子目录
+			if err := s.mkdir(ctx, entryRp); err != nil {
+				return err
+			}
+		} else {
+			// 上传文件到对应远端路径
+			if err := s.uploadSingleFile(ctx, entry.AbsolutePath, entryRp, out); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
