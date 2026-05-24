@@ -16,6 +16,8 @@ type UserService struct {
 	client *client.APIClient
 
 	// once 保证 PrivateUID 只发起一次网络请求。
+	// 由于 sync.Once 只会执行第一次回调，首次返回的成功结果或错误都会被缓存到该服务实例生命周期结束；
+	// 后续调用不会重试，因此首次错误也会一直沿用。
 	once sync.Once
 
 	// cachedUID 是首次成功获取后缓存的私有用户 ID。
@@ -41,13 +43,13 @@ func NewUserService(cli *client.APIClient) *UserService {
 // 首次调用时向 /api/openApi/user/profile/v1 发起请求并缓存结果；
 // 后续调用直接返回缓存值，不再产生网络请求。
 func (s *UserService) PrivateUID(ctx context.Context) (int64, error) {
-	// 利用 sync.Once 保证只请求一次
+	// 利用 sync.Once 保证只请求一次；首次失败后也不会再重试。
 	s.once.Do(func() {
 		var profile profileData
 		// 调用用户资料接口获取 id 字段
 		err := s.client.GetJSON(ctx, "/api/openApi/user/profile/v1", nil, &profile)
 		if err != nil {
-			s.cacheErr = fmt.Errorf("failed to fetch user profile: %w", err)
+			s.cacheErr = fmt.Errorf("获取用户资料失败: %w", err)
 			return
 		}
 		s.cachedUID = profile.ID

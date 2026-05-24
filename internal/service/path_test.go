@@ -135,8 +135,8 @@ func TestResolve_PathWithoutLeadingSlashGetsNormalized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if rp.Path[0] != '/' {
-		t.Fatalf("expected path to start with /, got %s", rp.Path)
+	if rp.Path != "/no-leading-slash" {
+		t.Fatalf("expected normalized path=/no-leading-slash, got %s", rp.Path)
 	}
 }
 

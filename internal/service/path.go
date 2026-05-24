@@ -86,11 +86,8 @@ func (s *PathService) Resolve(ctx context.Context, raw string) (ResolvedPath, er
 	// 根据资源域填充 UID
 	var uid int64
 	switch area {
-	case "public":
-		// public 域 UID 固定为 0，无需调用回调
-		uid = 0
-	case "local":
-		// local 域不使用远端 UID，固定为 0
+	case "public", "local":
+		// public 与 local 域都不使用远端 UID，固定为 0。
 		uid = 0
 	case "private":
 		// private 域通过回调获取当前用户 UID

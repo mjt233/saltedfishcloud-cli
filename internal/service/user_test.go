@@ -62,6 +62,29 @@ func TestUserService_PrivateUID_CachesResult(t *testing.T) {
 	}
 }
 
+// TestUserService_PrivateUID_CachesError 验证首次请求失败后，后续调用直接返回缓存错误且不会重试。
+func TestUserService_PrivateUID_CachesError(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("boom"))
+	}))
+	defer srv.Close()
+
+	cli := client.NewAPIClient(srv.URL, "ticket")
+	svc := NewUserService(cli)
+
+	_, err1 := svc.PrivateUID(context.Background())
+	_, err2 := svc.PrivateUID(context.Background())
+	if err1 == nil || err2 == nil {
+		t.Fatal("expected errors for both calls, got nil")
+	}
+	if callCount != 1 {
+		t.Fatalf("expected server called once, got %d times", callCount)
+	}
+}
+
 // TestUserService_PrivateUID_PropagatesError 验证接口返回错误时 PrivateUID 正确透传错误。
 func TestUserService_PrivateUID_PropagatesError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
