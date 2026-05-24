@@ -75,3 +75,13 @@ func TestRemoteVersionCommand_MissingArgsReturnsError(t *testing.T) {
 		t.Fatal("expected error for extra arguments, got nil")
 	}
 }
+
+// TestVersionCommand_NoArgs 验证 version 命令不接受额外参数。
+func TestVersionCommand_NoArgs(t *testing.T) {
+	cmd := newVersionCommand()
+	cmd.SetArgs([]string{"extra-arg"})
+
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for extra arguments, got nil")
+	}
+}
