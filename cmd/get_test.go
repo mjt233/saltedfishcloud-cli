@@ -83,8 +83,8 @@ func TestGetCommand_DownloadsDirectory_CreatesNestedFiles(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"code": 200,
 					"data": []map[string]any{
-						{"name": "a.txt", "type": "file", "size": 4, "mtime": "2024-01-01"},
-						{"name": "sub", "type": "dir", "size": 0, "mtime": "2024-01-01"},
+						{"name": "a.txt", "dir": false, "size": "4", "mtime": "1778581444799"},
+						{"name": "sub", "dir": true, "size": "-1", "mtime": "1778581444799"},
 					},
 					"msg": "OK",
 				})
@@ -92,7 +92,7 @@ func TestGetCommand_DownloadsDirectory_CreatesNestedFiles(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"code": 200,
 					"data": []map[string]any{
-						{"name": "b.txt", "type": "file", "size": 4, "mtime": "2024-01-01"},
+						{"name": "b.txt", "dir": false, "size": "4", "mtime": "1778581444799"},
 					},
 					"msg": "OK",
 				})

@@ -24,7 +24,7 @@ func TestLSCommand_OutputsTableHeaderAndRow(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 200,
 			"data": []map[string]any{
-				{"name": "demo.txt", "type": "file", "size": 512, "mtime": "2024-06-01 12:00:00"},
+				{"name": "demo.txt", "dir": false, "size": "512", "mtime": "1778581444799"},
 			},
 			"msg": "OK",
 		})

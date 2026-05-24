@@ -115,8 +115,8 @@ func (c *APIClient) doJSONRequest(req *http.Request, out any) error {
 		return fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	// businessCode 非零时返回业务层错误（优先于 code 检查）
-	if envelope.BusinessCode != 0 {
+	// businessCode 非零且非 200（成功）时返回业务层错误（优先于 code 检查）
+	if envelope.BusinessCode != 0 && envelope.BusinessCode != 200 {
 		return &BusinessError{BusinessCode: envelope.BusinessCode, Msg: envelope.Msg}
 	}
 

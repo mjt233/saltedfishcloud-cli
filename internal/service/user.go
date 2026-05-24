@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/mjt233/saltedfishcloud-cli/internal/client"
@@ -29,8 +30,8 @@ type UserService struct {
 
 // profileData 是 /api/openApi/user/profile/v1 响应中 data 字段的结构。
 type profileData struct {
-	// ID 是用户的唯一标识符。
-	ID int64 `json:"id"`
+	// ID 是用户的唯一标识符，接口以字符串形式返回。
+	ID string `json:"id"`
 }
 
 // NewUserService 构造一个 UserService 实例。
@@ -52,7 +53,13 @@ func (s *UserService) PrivateUID(ctx context.Context) (int64, error) {
 			s.cacheErr = fmt.Errorf("failed to get user profile: %w", err)
 			return
 		}
-		s.cachedUID = profile.ID
+		// 接口返回的 id 为字符串，需转换为 int64
+		uid, err := strconv.ParseInt(profile.ID, 10, 64)
+		if err != nil {
+			s.cacheErr = fmt.Errorf("failed to parse user id %q: %w", profile.ID, err)
+			return
+		}
+		s.cachedUID = uid
 	})
 	return s.cachedUID, s.cacheErr
 }

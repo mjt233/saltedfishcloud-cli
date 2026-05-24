@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,12 +27,50 @@ var removeLocalFile = os.Remove
 type DiskEntry struct {
 	// Name 是文件或目录名称。
 	Name string `json:"name"`
-	// Type 为条目类型，通常为 "file" 或 "dir"。
-	Type string `json:"type"`
-	// Size 是文件字节大小；目录通常为 0。
-	Size int64 `json:"size"`
-	// Mtime 是最后修改时间，格式由后端决定。
+	// Type 为条目类型，"dir" 或 "file"；由 UnmarshalJSON 根据 dir 字段推导。
+	Type string
+	// Size 是文件字节大小；目录通常为 -1，由 UnmarshalJSON 从字符串解析。
+	Size int64
+	// Mtime 是最后修改时间戳（毫秒），由后端以字符串形式返回。
 	Mtime string `json:"mtime"`
+}
+
+// diskEntryRaw 是 DiskEntry 的原始 JSON 映射，用于处理接口返回的非标字段类型。
+type diskEntryRaw struct {
+	Name  string      `json:"name"`
+	Dir   bool        `json:"dir"`
+	Size  interface{} `json:"size"` // 接口以字符串形式返回，如 "-1"
+	Mtime string      `json:"mtime"`
+}
+
+// UnmarshalJSON 实现自定义反序列化，兼容接口返回的 size 字符串和 dir 布尔字段。
+func (e *DiskEntry) UnmarshalJSON(data []byte) error {
+	var raw diskEntryRaw
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	e.Name = raw.Name
+	e.Mtime = raw.Mtime
+	// 根据 dir 布尔字段推导类型字符串
+	if raw.Dir {
+		e.Type = "dir"
+	} else {
+		e.Type = "file"
+	}
+	// size 可能是字符串或数字，统一转换为 int64
+	switch v := raw.Size.(type) {
+	case string:
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse size %q: %w", v, err)
+		}
+		e.Size = n
+	case float64:
+		e.Size = int64(v)
+	default:
+		e.Size = 0
+	}
+	return nil
 }
 
 // DiskFileService 提供远端磁盘文件的查询与操作能力。

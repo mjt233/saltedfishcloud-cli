@@ -19,7 +19,7 @@ func TestUserService_PrivateUID_FetchesUID(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 200,
-			"data": map[string]any{"id": 42},
+			"data": map[string]any{"id": "42"},
 			"msg":  "OK",
 		})
 	}))
@@ -44,7 +44,7 @@ func TestUserService_PrivateUID_CachesResult(t *testing.T) {
 		callCount++
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 200,
-			"data": map[string]any{"id": 99},
+			"data": map[string]any{"id": "99"},
 			"msg":  "OK",
 		})
 	}))

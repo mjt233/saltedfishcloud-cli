@@ -63,8 +63,8 @@ func TestDiskFileService_List_DecodesEntries(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 200,
 			"data": []map[string]any{
-				{"name": "file.txt", "type": "file", "size": 1024, "mtime": "2024-01-01 00:00:00"},
-				{"name": "folder", "type": "dir", "size": 0, "mtime": "2024-01-02 00:00:00"},
+				{"name": "file.txt", "dir": false, "size": "1024", "mtime": "1778581444799"},
+				{"name": "folder", "dir": true, "size": "-1", "mtime": "1778674063900"},
 			},
 			"msg": "OK",
 		})
@@ -184,8 +184,8 @@ func TestDiskFileService_Download_Directory_RecursivelyCreatesFiles(t *testing.T
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"code": 200,
 					"data": []map[string]any{
-						{"name": "file.txt", "type": "file", "size": 6, "mtime": "2024-01-01"},
-						{"name": "subdir", "type": "dir", "size": 0, "mtime": "2024-01-01"},
+						{"name": "file.txt", "dir": false, "size": "6", "mtime": "1778581444799"},
+						{"name": "subdir", "dir": true, "size": "-1", "mtime": "1778581444799"},
 					},
 					"msg": "OK",
 				})
@@ -193,7 +193,7 @@ func TestDiskFileService_Download_Directory_RecursivelyCreatesFiles(t *testing.T
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"code": 200,
 					"data": []map[string]any{
-						{"name": "nested.txt", "type": "file", "size": 6, "mtime": "2024-01-01"},
+						{"name": "nested.txt", "dir": false, "size": "6", "mtime": "1778581444799"},
 					},
 					"msg": "OK",
 				})
