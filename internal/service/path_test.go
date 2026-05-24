@@ -109,8 +109,8 @@ func TestResolve_PrivateUIDErrorReturnsWrappedMessage(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for privateUID callback failure, got nil")
 	}
-	if !strings.Contains(err.Error(), "获取私有用户 UID 失败:") {
-		t.Fatalf("error should preserve wrapped Chinese prefix, got: %s", err.Error())
+	if !strings.Contains(err.Error(), "failed to get private user UID:") {
+		t.Fatalf("error should preserve wrapped prefix, got: %s", err.Error())
 	}
 }
 
@@ -127,7 +127,7 @@ func TestResolve_InvalidAreaReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "ftp") {
 		t.Fatalf("error should mention invalid area value, got: %s", err.Error())
 	}
-	if !strings.Contains(err.Error(), "local、private、public") {
+	if !strings.Contains(err.Error(), "local, private, public") {
 		t.Fatalf("error should mention valid options, got: %s", err.Error())
 	}
 	if !strings.Contains(err.Error(), "[resourceArea:]") {

@@ -17,8 +17,8 @@ import (
 func newMvCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "mv <sourceResourcePath> <targetResourcePath>",
-		Short: "移动远端文件或目录",
-		Long:  "将文件或目录从源路径移动到目标路径，支持远端到远端、本地到远端、远端到本地。",
+		Short: "Move remote files or directories",
+		Long:  "Move files or directories from source path to target path, supporting remote-to-remote, local-to-remote, and remote-to-local.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高
@@ -43,7 +43,7 @@ func newMvCommand() *cobra.Command {
 			}
 
 			// 输出完成提示
-			fmt.Fprintf(cmd.OutOrStdout(), "移动完成: %s -> %s\n", sourcePath, targetPath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Move complete: %s -> %s\n", sourcePath, targetPath)
 			return nil
 		},
 	}

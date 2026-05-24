@@ -269,7 +269,7 @@ func TestGetCommand_DefaultLocalName_RejectsUnsafeRootPath(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsafe default local path, got nil")
 	}
-	if !strings.Contains(err.Error(), "显式指定 localPath") {
+	if !strings.Contains(err.Error(), "specify localPath explicitly") {
 		t.Fatalf("error should request explicit localPath, got: %s", err.Error())
 	}
 }

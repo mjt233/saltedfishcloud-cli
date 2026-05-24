@@ -16,8 +16,8 @@ import (
 func newRenameCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "rename <sourceResourcePath> <newName>",
-		Short: "重命名远端文件或目录",
-		Long:  "将指定远端路径的文件或目录重命名为新名称，支持 private 和 public 资源域。",
+		Short: "Rename remote files or directories",
+		Long:  "Rename the file or directory at the specified remote path to a new name, supporting private and public resource areas.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高
@@ -41,7 +41,7 @@ func newRenameCommand() *cobra.Command {
 			}
 
 			// 输出完成提示
-			fmt.Fprintf(cmd.OutOrStdout(), "重命名成功: %s -> %s\n", sourcePath, newName)
+			fmt.Fprintf(cmd.OutOrStdout(), "Rename successful: %s -> %s\n", sourcePath, newName)
 			return nil
 		},
 	}

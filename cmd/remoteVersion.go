@@ -15,7 +15,7 @@ import (
 func newRemoteVersionCommand(newClient func(cmd *cobra.Command) (*client.APIClient, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "remoteVersion",
-		Short: "查询服务端版本号",
+		Short: "Query server version",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 通过工厂函数构造 API 客户端

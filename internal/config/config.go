@@ -35,7 +35,7 @@ func Load(opts Options) (Config, error) {
 	// 第一阶段：分别初始化文件层和环境变量层的 Viper 实例。
 	fileViper, err := newFileViper()
 	if err != nil {
-		return Config{}, fmt.Errorf("配置文件读取失败: %w", err)
+		return Config{}, fmt.Errorf("failed to read config file: %w", err)
 	}
 	envViper := newEnvViper()
 

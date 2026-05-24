@@ -16,8 +16,8 @@ import (
 func newCpCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "cp <sourceResourcePath> <targetResourcePath>",
-		Short: "复制远端文件或目录",
-		Long:  "将远端文件或目录从源路径复制到目标路径，支持 private 和 public 资源域。",
+		Short: "Copy remote files or directories",
+		Long:  "Copy remote files or directories from source path to target path, supporting private and public resource areas.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高
@@ -42,7 +42,7 @@ func newCpCommand() *cobra.Command {
 			}
 
 			// 输出完成提示
-			fmt.Fprintf(cmd.OutOrStdout(), "复制完成: %s -> %s\n", sourcePath, targetPath)
+			fmt.Fprintf(cmd.OutOrStdout(), "Copy complete: %s -> %s\n", sourcePath, targetPath)
 			return nil
 		},
 	}

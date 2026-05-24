@@ -52,8 +52,8 @@ func NewRootCommand() *cobra.Command {
 	}
 
 	// 注册全局持久标志，将标志值绑定到包级变量，供子命令复用。
-	root.PersistentFlags().StringVar(&apiTicket, "api-ticket", "", "用于鉴权的 API Ticket")
-	root.PersistentFlags().StringVar(&serviceURL, "service-url", "", "咸鱼云服务的基础 URL")
+	root.PersistentFlags().StringVar(&apiTicket, "api-ticket", "", "API Ticket for authentication")
+	root.PersistentFlags().StringVar(&serviceURL, "service-url", "", "Base URL of the Salted Fish Cloud service")
 
 	// 注册子命令
 	root.AddCommand(newLSCommand())

@@ -30,13 +30,13 @@ func Walk(root string) ([]WalkEntry, error) {
 	// 获取规范化绝对路径，消除相对路径和符号链接中的 ".." 等
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
-		return nil, fmt.Errorf("无法解析路径 %q: %w", root, err)
+		return nil, fmt.Errorf("cannot resolve path %q: %w", root, err)
 	}
 
 	// 检查路径是否存在并获取元信息
 	rootInfo, err := os.Stat(absRoot)
 	if err != nil {
-		return nil, fmt.Errorf("路径 %q 不存在或无法访问: %w", root, err)
+		return nil, fmt.Errorf("path %q does not exist or is inaccessible: %w", root, err)
 	}
 
 	// 若根路径是文件，直接返回单个条目
@@ -63,7 +63,7 @@ func Walk(root string) ([]WalkEntry, error) {
 		// 计算相对于根目录的路径
 		relPath, err := filepath.Rel(absRoot, p)
 		if err != nil {
-			return fmt.Errorf("计算相对路径失败: %w", err)
+			return fmt.Errorf("failed to compute relative path: %w", err)
 		}
 		entries = append(entries, WalkEntry{
 			AbsolutePath: p,
@@ -73,7 +73,7 @@ func Walk(root string) ([]WalkEntry, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("遍历目录 %q 失败: %w", root, err)
+		return nil, fmt.Errorf("failed to walk directory %q: %w", root, err)
 	}
 	return entries, nil
 }

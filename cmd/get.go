@@ -18,8 +18,8 @@ import (
 func newGetCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <remoteResourcePath> [localPath]",
-		Short: "下载远端文件或目录",
-		Long:  "下载指定远端路径的文件或目录到本地，支持 private 和 public 资源域。目录会被递归下载。",
+		Short: "Download remote files or directories",
+		Long:  "Download files or directories from the specified remote path to local, supporting private and public resource areas. Directories are downloaded recursively.",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高
@@ -48,7 +48,7 @@ func newGetCommand() *cobra.Command {
 				}
 				localPath = localfs.EnsureDownloadTarget(path.Base(rp.Path), "")
 				if localPath == "/" || localPath == "." || localPath == "" {
-					return fmt.Errorf("无法为远端路径 %q 推导默认本地目标，请显式指定 localPath", rp.Path)
+					return fmt.Errorf("cannot infer default local target for remote path %q, please specify localPath explicitly", rp.Path)
 				}
 			}
 
@@ -58,7 +58,7 @@ func newGetCommand() *cobra.Command {
 			}
 
 			// 输出完成提示
-			fmt.Fprintf(cmd.OutOrStdout(), "\n下载完成: %s\n", localPath)
+			fmt.Fprintf(cmd.OutOrStdout(), "\nDownload complete: %s\n", localPath)
 			return nil
 		},
 	}

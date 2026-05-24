@@ -399,7 +399,7 @@ func TestDiskFileService_Download_PartialFileCleanupFailureIsReported(t *testing
 	if err == nil {
 		t.Fatal("expected error for interrupted download, got nil")
 	}
-	if !strings.Contains(err.Error(), "清理不完整文件") {
+	if !strings.Contains(err.Error(), "failed to clean up incomplete file") {
 		t.Fatalf("error should mention cleanup failure, got: %s", err.Error())
 	}
 	if !strings.Contains(err.Error(), "remove failed") {

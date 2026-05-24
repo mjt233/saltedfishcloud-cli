@@ -17,10 +17,10 @@ func TestRun_PrintsErrorToStderrOnFailure(t *testing.T) {
 	code := run(&buf, func() error { return testErr })
 
 	if code != 1 {
-		t.Errorf("退出码 = %d，期望 1", code)
+		t.Errorf("exit code = %d, expected 1", code)
 	}
 	if !strings.Contains(buf.String(), "something went wrong") {
-		t.Errorf("stderr = %q，期望包含 %q", buf.String(), "something went wrong")
+		t.Errorf("stderr = %q, expected to contain %q", buf.String(), "something went wrong")
 	}
 }
 
@@ -32,9 +32,9 @@ func TestRun_ReturnsZeroOnSuccess(t *testing.T) {
 	code := run(&buf, func() error { return nil })
 
 	if code != 0 {
-		t.Errorf("退出码 = %d，期望 0", code)
+		t.Errorf("exit code = %d, expected 0", code)
 	}
 	if buf.Len() != 0 {
-		t.Errorf("stderr = %q，期望为空", buf.String())
+		t.Errorf("stderr = %q, expected to be empty", buf.String())
 	}
 }

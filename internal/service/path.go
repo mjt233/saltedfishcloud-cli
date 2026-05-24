@@ -53,7 +53,7 @@ func NewPathService(privateUID func(context.Context) (int64, error)) *PathServic
 func (s *PathService) Resolve(ctx context.Context, raw string) (ResolvedPath, error) {
 	// 空输入直接报错，提示期望格式
 	if raw == "" {
-		return ResolvedPath{}, fmt.Errorf("路径不能为空，期望格式为 [resourceArea:]<path>")
+		return ResolvedPath{}, fmt.Errorf("path cannot be empty, expected format: [resourceArea:]<path>")
 	}
 
 	var area, rawPath string
@@ -70,12 +70,12 @@ func (s *PathService) Resolve(ctx context.Context, raw string) (ResolvedPath, er
 
 	// 校验资源域合法性
 	if !supportedAreas[area] {
-		return ResolvedPath{}, fmt.Errorf("不支持的资源域 %q，合法值为 local、private、public（格式：[resourceArea:]<path>）", area)
+		return ResolvedPath{}, fmt.Errorf("unsupported resource area %q, valid values: local, private, public (format: [resourceArea:]<path>)", area)
 	}
 
 	// 冒号后路径为空时报错
 	if rawPath == "" {
-		return ResolvedPath{}, fmt.Errorf("路径不能为空，期望格式为 [resourceArea:]<path>")
+		return ResolvedPath{}, fmt.Errorf("path cannot be empty, expected format: [resourceArea:]<path>")
 	}
 
 	// 规范化路径：补全前缀 /（仅限 remote 域），去除末尾多余斜杠（根路径 / 除外）
@@ -99,7 +99,7 @@ func (s *PathService) Resolve(ctx context.Context, raw string) (ResolvedPath, er
 		var err error
 		uid, err = s.privateUID(ctx)
 		if err != nil {
-			return ResolvedPath{}, fmt.Errorf("获取私有用户 UID 失败: %w", err)
+			return ResolvedPath{}, fmt.Errorf("failed to get private user UID: %w", err)
 		}
 	}
 

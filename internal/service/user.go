@@ -49,7 +49,7 @@ func (s *UserService) PrivateUID(ctx context.Context) (int64, error) {
 		// 调用用户资料接口获取 id 字段
 		err := s.client.GetJSON(ctx, "/api/openApi/user/profile/v1", nil, &profile)
 		if err != nil {
-			s.cacheErr = fmt.Errorf("获取用户资料失败: %w", err)
+			s.cacheErr = fmt.Errorf("failed to get user profile: %w", err)
 			return
 		}
 		s.cachedUID = profile.ID

@@ -17,8 +17,8 @@ import (
 func newUploadCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "upload <localPath> <remoteResourcePath>",
-		Short: "上传本地文件或目录到远端",
-		Long:  "将本地文件或目录上传到指定远端资源路径，支持 private 和 public 资源域。目录会被递归上传。",
+		Short: "Upload local files or directories to remote",
+		Long:  "Upload local files or directories to the specified remote resource path, supporting private and public resource areas. Directories are uploaded recursively.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高
@@ -42,7 +42,7 @@ func newUploadCommand() *cobra.Command {
 			}
 
 			// 输出完成提示
-			fmt.Fprintf(cmd.OutOrStdout(), "\n上传完成: %s -> %s\n", localPath, remotePath)
+			fmt.Fprintf(cmd.OutOrStdout(), "\nUpload complete: %s -> %s\n", localPath, remotePath)
 			return nil
 		},
 	}

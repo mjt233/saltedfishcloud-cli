@@ -16,7 +16,7 @@ var version = "dev"
 func newVersionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
-		Short: "输出当前 CLI 版本号",
+		Short: "Print current CLI version",
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			// 将版本号写入标准输出

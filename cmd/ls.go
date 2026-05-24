@@ -16,8 +16,8 @@ import (
 func newLSCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "ls <path>",
-		Short: "列出远端目录内容",
-		Long:  "列出指定远端路径下的文件和目录，支持 private 和 public 资源域。",
+		Short: "List remote directory contents",
+		Long:  "List files and directories under the specified remote path, supporting private and public resource areas.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高

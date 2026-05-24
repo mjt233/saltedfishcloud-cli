@@ -64,7 +64,7 @@ func (s *DiskFileService) List(ctx context.Context, rawPath string) ([]DiskEntry
 
 	// local 域不走远端接口，当前切片明确拒绝
 	if rp.Area == "local" {
-		return nil, fmt.Errorf("local 资源域暂不支持远端文件列表操作，请使用 private 或 public 域")
+		return nil, fmt.Errorf("local resource area does not support remote file listing, please use private or public area")
 	}
 
 	// 使用已解析的路径调用列表接口
@@ -104,7 +104,7 @@ func (s *DiskFileService) Download(ctx context.Context, remotePath, localPath st
 
 	// local 域不支持远端下载
 	if rp.Area == "local" {
-		return fmt.Errorf("local 资源域不支持远端下载操作，请使用 private 或 public 域")
+		return fmt.Errorf("local resource area does not support remote download, please use private or public area")
 	}
 
 	// 确保 out 不为 nil，避免进度条写入 panic
@@ -149,19 +149,19 @@ func (s *DiskFileService) downloadFile(ctx context.Context, rp ResolvedPath, loc
 	// 发起下载请求，获取二进制流响应
 	resp, err := s.client.Download(ctx, "/api/openApi/diskFile/download/v1", q)
 	if err != nil {
-		return fmt.Errorf("下载文件 %q 失败: %w", rp.Path, err)
+		return fmt.Errorf("failed to download file %q: %w", rp.Path, err)
 	}
 	defer resp.Body.Close()
 
 	// 确保本地父目录存在
 	if err := localfs.EnsureParentDir(localPath); err != nil {
-		return fmt.Errorf("创建目标目录失败: %w", err)
+		return fmt.Errorf("failed to create target directory: %w", err)
 	}
 
 	// 创建本地目标文件
 	f, err := os.Create(localPath)
 	if err != nil {
-		return fmt.Errorf("创建本地文件 %q 失败: %w", localPath, err)
+		return fmt.Errorf("failed to create local file %q: %w", localPath, err)
 	}
 
 	// copyOK 标记写入是否成功；defer 负责关闭文件并在失败时删除不完整文件。
@@ -171,7 +171,7 @@ func (s *DiskFileService) downloadFile(ctx context.Context, rp ResolvedPath, loc
 		if !copyOK {
 			// 下载失败时删除已创建的不完整文件，避免遗留损坏数据
 			if removeErr := removeLocalFile(localPath); removeErr != nil {
-				err = errors.Join(err, fmt.Errorf("清理不完整文件 %q 失败: %w", localPath, removeErr))
+				err = errors.Join(err, fmt.Errorf("failed to clean up incomplete file %q: %w", localPath, removeErr))
 			}
 		}
 	}()
@@ -186,7 +186,7 @@ func (s *DiskFileService) downloadFile(ctx context.Context, rp ResolvedPath, loc
 
 	// 同时写入文件和进度条
 	if _, err := io.Copy(io.MultiWriter(f, bar), resp.Body); err != nil {
-		return fmt.Errorf("写入文件 %q 失败: %w", localPath, err)
+		return fmt.Errorf("failed to write file %q: %w", localPath, err)
 	}
 	// 确保进度条显示完成状态
 	_ = bar.Finish()
@@ -199,7 +199,7 @@ func (s *DiskFileService) downloadFile(ctx context.Context, rp ResolvedPath, loc
 func (s *DiskFileService) downloadDir(ctx context.Context, rp ResolvedPath, localPath string, entries []DiskEntry, out io.Writer) error {
 	// 创建本地目录（含所有中间目录）
 	if err := os.MkdirAll(localPath, 0755); err != nil {
-		return fmt.Errorf("创建本地目录 %q 失败: %w", localPath, err)
+		return fmt.Errorf("failed to create local directory %q: %w", localPath, err)
 	}
 
 	// 遍历所有条目，按类型分别处理
@@ -217,7 +217,7 @@ func (s *DiskFileService) downloadDir(ctx context.Context, rp ResolvedPath, loca
 			// 子目录：先列出其内容，再递归下载
 			subEntries, err := s.listByResolved(ctx, entryRp)
 			if err != nil {
-				return fmt.Errorf("列出子目录 %q 失败: %w", entryRp.Path, err)
+				return fmt.Errorf("failed to list subdirectory %q: %w", entryRp.Path, err)
 			}
 			if err := s.downloadDir(ctx, entryRp, entryLocalPath, subEntries, out); err != nil {
 				return err
@@ -244,7 +244,7 @@ func (s *DiskFileService) Remove(ctx context.Context, rawPath string) error {
 
 	// local 域不走远端接口
 	if rp.Area == "local" {
-		return fmt.Errorf("local 资源域不支持远端删除操作，请使用 private 或 public 域")
+		return fmt.Errorf("local resource area does not support remote deletion, please use private or public area")
 	}
 
 	// 拆分路径为父目录和文件名
@@ -260,7 +260,7 @@ func (s *DiskFileService) Remove(ctx context.Context, rawPath string) error {
 	// 发送 DELETE 请求，body 包含文件名数组
 	names := []string{fileName}
 	if err := s.client.DeleteJSON(ctx, "/api/openApi/diskFile/delete/v1", q, names, nil); err != nil {
-		return fmt.Errorf("删除 %q 失败: %w", rp.Path, err)
+		return fmt.Errorf("failed to delete %q: %w", rp.Path, err)
 	}
 	return nil
 }
@@ -278,7 +278,7 @@ func (s *DiskFileService) Rename(ctx context.Context, rawPath, newName string) e
 
 	// local 域不走远端接口
 	if rp.Area == "local" {
-		return fmt.Errorf("local 资源域不支持远端重命名操作，请使用 private 或 public 域")
+		return fmt.Errorf("local resource area does not support remote rename, please use private or public area")
 	}
 
 	// 拆分路径为父目录和旧名称
@@ -299,7 +299,7 @@ func (s *DiskFileService) Rename(ctx context.Context, rawPath, newName string) e
 
 	// 发送 POST 请求到重命名接口，同时携带查询参数和 JSON body
 	if err := s.client.PostQueryWithBody(ctx, "/api/openApi/diskFile/rename/v1", q, body, nil); err != nil {
-		return fmt.Errorf("重命名 %q 为 %q 失败: %w", rp.Path, newName, err)
+		return fmt.Errorf("failed to rename %q to %q: %w", rp.Path, newName, err)
 	}
 	return nil
 }
@@ -321,7 +321,7 @@ func (s *DiskFileService) Upload(ctx context.Context, localPath, remotePath stri
 
 	// local 域不支持远端上传操作
 	if rp.Area == "local" {
-		return fmt.Errorf("local 资源域不支持远端上传操作，请使用 private 或 public 域")
+		return fmt.Errorf("local resource area does not support remote upload, please use private or public area")
 	}
 
 	// 确保 out 不为 nil，避免进度条写入 panic
@@ -333,9 +333,9 @@ func (s *DiskFileService) Upload(ctx context.Context, localPath, remotePath stri
 	localInfo, err := os.Stat(localPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("本地路径 %q 不存在", localPath)
+			return fmt.Errorf("local path %q does not exist", localPath)
 		}
-		return fmt.Errorf("读取本地路径 %q 失败: %w", localPath, err)
+		return fmt.Errorf("failed to read local path %q: %w", localPath, err)
 	}
 
 	// 根据本地路径类型分别处理
@@ -354,7 +354,7 @@ func (s *DiskFileService) uploadSingleFile(ctx context.Context, localPath string
 	// 打开本地文件
 	f, err := os.Open(localPath)
 	if err != nil {
-		return fmt.Errorf("打开文件 %q 失败: %w", localPath, err)
+		return fmt.Errorf("failed to open file %q: %w", localPath, err)
 	}
 	defer f.Close()
 
@@ -385,7 +385,7 @@ func (s *DiskFileService) uploadSingleFile(ctx context.Context, localPath string
 	// 上传文件，同步更新进度条
 	reader := io.TeeReader(f, bar)
 	if err := s.client.UploadFile(ctx, "/api/openApi/diskFile/upload/v1", q, "file", fileName, reader, nil); err != nil {
-		return fmt.Errorf("上传文件 %q 失败: %w", localPath, err)
+		return fmt.Errorf("failed to upload file %q: %w", localPath, err)
 	}
 	_ = bar.Finish()
 	return nil
@@ -400,7 +400,7 @@ func (s *DiskFileService) mkdir(ctx context.Context, rp ResolvedPath) error {
 		"name": {path.Base(rp.Path)},
 	}
 	if err := s.client.PostQuery(ctx, "/api/openApi/diskFile/mkdir/v1", q, nil); err != nil {
-		return fmt.Errorf("创建远端目录 %q 失败: %w", rp.Path, err)
+		return fmt.Errorf("failed to create remote directory %q: %w", rp.Path, err)
 	}
 	return nil
 }
@@ -412,7 +412,7 @@ func (s *DiskFileService) uploadDir(ctx context.Context, localPath string, rp Re
 	// 获取本地目录的所有条目（目录先于其内容出现）
 	entries, err := localfs.Walk(localPath)
 	if err != nil {
-		return fmt.Errorf("遍历本地目录 %q 失败: %w", localPath, err)
+		return fmt.Errorf("failed to walk local directory %q: %w", localPath, err)
 	}
 
 	// 遍历条目，按顺序执行 mkdir（目录）或 upload（文件）

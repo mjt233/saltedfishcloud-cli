@@ -156,7 +156,7 @@ func TestLoad_MalformedConfigReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load should return an error for malformed config file, got nil")
 	}
-	if !strings.Contains(err.Error(), "配置文件读取失败") {
+	if !strings.Contains(err.Error(), "failed to read config file") {
 		t.Fatalf("error should mention config file read failure, got: %v", err)
 	}
 }

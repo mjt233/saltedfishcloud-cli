@@ -50,7 +50,7 @@ func (s *CopierService) Copy(ctx context.Context, source, target string) error {
 
 	// 源路径不能是 local
 	if srcRP.Area == "local" {
-		return fmt.Errorf("local 资源域不支持作为复制操作的源，请使用 private 或 public 域")
+		return fmt.Errorf("local resource area does not support being the source of a copy operation, please use private or public area")
 	}
 
 	tgtRP, err := s.paths.Resolve(ctx, target)
@@ -60,7 +60,7 @@ func (s *CopierService) Copy(ctx context.Context, source, target string) error {
 
 	// 目标路径不能是 local
 	if tgtRP.Area == "local" {
-		return fmt.Errorf("local 资源域不支持作为复制操作的目标，请使用 private 或 public 域")
+		return fmt.Errorf("local resource area does not support being the target of a copy operation, please use private or public area")
 	}
 
 	// 获取要复制的文件名列表
@@ -80,7 +80,7 @@ func (s *CopierService) Copy(ctx context.Context, source, target string) error {
 
 	// 发送 POST 请求到复制接口
 	if err := s.client.PostJSON(ctx, "/api/openApi/diskFile/copy/v1", req, nil); err != nil {
-		return fmt.Errorf("复制 %q 到 %q 失败: %w", source, target, err)
+		return fmt.Errorf("failed to copy %q to %q: %w", source, target, err)
 	}
 	return nil
 }
@@ -120,19 +120,19 @@ func (s *CopierService) Move(ctx context.Context, source, target string) error {
 	}
 
 	// local -> local：不支持
-	return fmt.Errorf("local 到 local 的移动暂不支持")
+	return fmt.Errorf("local-to-local move is not supported yet")
 }
 
 // moveLocalToRemote 将本地文件上传到远端，成功后删除本地源文件。
 func (s *CopierService) moveLocalToRemote(ctx context.Context, localPath, remoteTarget string) error {
 	// 上传本地文件到远端
 	if err := s.disk.Upload(ctx, localPath, remoteTarget, nil); err != nil {
-		return fmt.Errorf("上传 %q 到 %q 失败: %w", localPath, remoteTarget, err)
+		return fmt.Errorf("failed to upload %q to %q: %w", localPath, remoteTarget, err)
 	}
 
 	// 上传成功后删除本地源（目录使用 RemoveAll，文件使用 Remove）
 	if err := os.RemoveAll(localPath); err != nil {
-		return fmt.Errorf("删除本地源 %q 失败: %w", localPath, err)
+		return fmt.Errorf("failed to delete local source %q: %w", localPath, err)
 	}
 	return nil
 }
@@ -141,12 +141,12 @@ func (s *CopierService) moveLocalToRemote(ctx context.Context, localPath, remote
 func (s *CopierService) moveRemoteToLocal(ctx context.Context, srcRP ResolvedPath, localPath string) error {
 	// 下载远端文件到本地
 	if err := s.disk.Download(ctx, srcRP.Area+":"+srcRP.Path, localPath, nil); err != nil {
-		return fmt.Errorf("下载 %q 到 %q 失败: %w", srcRP.Path, localPath, err)
+		return fmt.Errorf("failed to download %q to %q: %w", srcRP.Path, localPath, err)
 	}
 
 	// 下载成功后删除远端源文件
 	if err := s.disk.Remove(ctx, srcRP.Area+":"+srcRP.Path); err != nil {
-		return fmt.Errorf("删除远端源文件 %q 失败: %w", srcRP.Path, err)
+		return fmt.Errorf("failed to delete remote source %q: %w", srcRP.Path, err)
 	}
 	return nil
 }
@@ -171,7 +171,7 @@ func (s *CopierService) moveRemoteToRemote(ctx context.Context, srcRP, tgtRP Res
 
 	// 发送 POST 请求到移动接口
 	if err := s.client.PostJSON(ctx, "/api/openApi/diskFile/move/v1", req, nil); err != nil {
-		return fmt.Errorf("移动 %q 到 %q 失败: %w", srcRP.Path, tgtRP.Path, err)
+		return fmt.Errorf("failed to move %q to %q: %w", srcRP.Path, tgtRP.Path, err)
 	}
 	return nil
 }
@@ -198,5 +198,5 @@ func (s *CopierService) resolveFileNames(ctx context.Context, rp ResolvedPath) (
 	}
 
 	// 其他错误直接返回
-	return nil, fmt.Errorf("获取源路径 %q 的文件列表失败: %w", rp.Path, listErr)
+	return nil, fmt.Errorf("failed to get file list for source path %q: %w", rp.Path, listErr)
 }

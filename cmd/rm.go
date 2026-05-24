@@ -16,8 +16,8 @@ import (
 func newRmCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "rm <targetResourcePath>",
-		Short: "删除远端文件或目录",
-		Long:  "删除指定远端路径的文件或目录，支持 private 和 public 资源域。",
+		Short: "Delete remote files or directories",
+		Long:  "Delete files or directories at the specified remote path, supporting private and public resource areas.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高
@@ -38,7 +38,7 @@ func newRmCommand() *cobra.Command {
 			}
 
 			// 输出完成提示
-			fmt.Fprintf(cmd.OutOrStdout(), "删除成功: %s\n", args[0])
+			fmt.Fprintf(cmd.OutOrStdout(), "Delete successful: %s\n", args[0])
 			return nil
 		},
 	}
