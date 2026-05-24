@@ -32,23 +32,24 @@ type Config struct {
 // 并在必填字段缺失时一次性返回所有缺失字段的错误信息。
 // 配置文件不存在时静默忽略；文件存在但解析失败时返回错误。
 func Load(opts Options) (Config, error) {
-	// 第一阶段：初始化 Viper 实例，仅负责读取配置文件
-	v, err := newViper()
+	// 第一阶段：分别初始化文件层和环境变量层的 Viper 实例。
+	fileViper, err := newFileViper()
 	if err != nil {
 		return Config{}, fmt.Errorf("配置文件读取失败: %w", err)
 	}
+	envViper := newEnvViper()
 
-	// 第二阶段：按优先级合并。Viper 提供文件层的值；
-	// os.LookupEnv 仅在环境变量非空时才覆盖文件值，空字符串不覆盖。
+	// 第二阶段：按优先级合并。文件值先进入基础配置；
+	// 仅当环境变量非空时，才用 Viper 读取到的环境值覆盖文件值。
 	cfg := Config{
-		ServiceURL: v.GetString("serviceUrl"),
-		APITicket:  v.GetString("apiTicket"),
+		ServiceURL: fileViper.GetString("serviceUrl"),
+		APITicket:  fileViper.GetString("apiTicket"),
 	}
 	if val, ok := os.LookupEnv("SFC_SERVICE_URL"); ok && val != "" {
-		cfg.ServiceURL = val
+		cfg.ServiceURL = envViper.GetString("serviceUrl")
 	}
 	if val, ok := os.LookupEnv("SFC_API_TICKET"); ok && val != "" {
-		cfg.APITicket = val
+		cfg.APITicket = envViper.GetString("apiTicket")
 	}
 	if opts.ServiceURL != "" {
 		cfg.ServiceURL = opts.ServiceURL
@@ -72,10 +73,10 @@ func Load(opts Options) (Config, error) {
 	return cfg, nil
 }
 
-// newViper 构造并返回一个仅读取配置文件的 Viper 实例。
+// newFileViper 构造并返回一个仅读取配置文件的 Viper 实例。
 // 读取 ~/.config/sfc-cli/config.json；文件不存在时静默忽略，
-// 文件存在但无法解析时返回错误。环境变量由 Load 通过 os.LookupEnv 显式处理。
-func newViper() (*viper.Viper, error) {
+// 文件存在但无法解析时返回错误。
+func newFileViper() (*viper.Viper, error) {
 	v := viper.New()
 
 	home, err := os.UserHomeDir()
@@ -97,4 +98,19 @@ func newViper() (*viper.Viper, error) {
 	}
 
 	return v, nil
+}
+
+// newEnvViper 构造并返回一个用于读取环境变量的 Viper 实例。
+// 仅负责将 SFC_* 环境变量映射到内部配置键，不直接处理空值覆盖逻辑。
+func newEnvViper() *viper.Viper {
+	v := viper.New()
+	v.SetEnvPrefix("SFC")
+	v.SetEnvKeyReplacer(strings.NewReplacer(
+		"SERVICEURL", "SERVICE_URL",
+		"APITICKET", "API_TICKET",
+	))
+	v.AutomaticEnv()
+	_ = v.BindEnv("serviceUrl")
+	_ = v.BindEnv("apiTicket")
+	return v
 }

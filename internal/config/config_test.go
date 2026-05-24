@@ -76,6 +76,25 @@ func TestLoad_PrefersEnvOverFile(t *testing.T) {
 	}
 }
 
+// TestLoad_IgnoresEmptyEnvValues 验证空环境变量不会覆盖配置文件中的值。
+func TestLoad_IgnoresEmptyEnvValues(t *testing.T) {
+	home := t.TempDir()
+	filePath := filepath.Join(home, ".config", "sfc-cli", "config.json")
+	writeConfigFile(t, filePath, `{"serviceUrl":"https://file","apiTicket":"file-ticket"}`)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("SFC_SERVICE_URL", "")
+	t.Setenv("SFC_API_TICKET", "")
+
+	cfg, err := Load(Options{})
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.ServiceURL != "https://file" || cfg.APITicket != "file-ticket" {
+		t.Fatalf("unexpected config: %#v", cfg)
+	}
+}
+
 // TestLoad_ReadsFromFile 验证可从配置文件中正确读取配置。
 func TestLoad_ReadsFromFile(t *testing.T) {
 	home := t.TempDir()
