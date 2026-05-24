@@ -211,6 +211,89 @@ func TestNewAPIClient_NormalizesTrailingSlash(t *testing.T) {
 	}
 }
 
+// TestNewAPIClient_HasDefaultTimeout 验证 NewAPIClient 创建的 http.Client 携带默认超时时间。
+func TestNewAPIClient_HasDefaultTimeout(t *testing.T) {
+	cli := NewAPIClient("http://localhost", "t")
+	if cli.httpClient.Timeout == 0 {
+		t.Fatal("expected non-zero default timeout on http.Client, got 0")
+	}
+}
+
+// TestDoJSON_CodeNon200AndNoBusinessCodeReturnsError 验证 code != 200 且无 businessCode 时返回错误。
+func TestDoJSON_CodeNon200AndNoBusinessCodeReturnsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 500,
+			"msg":  "internal server error",
+		})
+	}))
+	defer srv.Close()
+
+	cli := NewAPIClient(srv.URL, "t")
+	var out any
+	err := cli.GetJSON(context.Background(), "/api/openApi/test", nil, &out)
+	if err == nil {
+		t.Fatal("expected error when code=500 and no businessCode, got nil")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("error should contain code 500, got: %s", err.Error())
+	}
+}
+
+// TestDoJSON_HTTP4xxReturnsErrorBeforeDecoding 验证 HTTP 状态码 >= 400 时直接返回错误，不尝试解析 JSON 信封。
+func TestDoJSON_HTTP4xxReturnsErrorBeforeDecoding(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 返回 HTTP 401，响应体为非 JSON（模拟网关或代理返回）
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("Unauthorized"))
+	}))
+	defer srv.Close()
+
+	cli := NewAPIClient(srv.URL, "t")
+	var out any
+	err := cli.GetJSON(context.Background(), "/api/openApi/test", nil, &out)
+	if err == nil {
+		t.Fatal("expected error for HTTP 401 response, got nil")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Fatalf("error should mention HTTP status 401, got: %s", err.Error())
+	}
+}
+
+// roundTripFunc 允许将函数直接用作 http.RoundTripper，方便在测试中拦截请求。
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+// TestDeleteJSON_NilBodySendsNoBody 验证 body == nil 时 DELETE 请求的 req.Body 为 nil 或 http.NoBody，
+// 而非包装了空缓冲区的非 nil reader。
+func TestDeleteJSON_NilBodySendsNoBody(t *testing.T) {
+	okResp := &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"code":200,"data":{},"msg":"OK"}`)),
+	}
+
+	var capturedBody io.ReadCloser
+	transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		capturedBody = req.Body
+		return okResp, nil
+	})
+
+	cli := &APIClient{
+		baseURL:    "http://example.com",
+		apiTicket:  "t",
+		httpClient: &http.Client{Transport: transport},
+	}
+	var out any
+	if err := cli.DeleteJSON(context.Background(), "/api/openApi/rm", nil, nil, &out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedBody != nil && capturedBody != http.NoBody {
+		t.Fatalf("expected nil or http.NoBody for nil-body DELETE, got non-nil body: %T", capturedBody)
+	}
+}
+
 // TestUploadFile_SendsMultipartFormData 验证 UploadFile 以 multipart/form-data 格式发送文件。
 func TestUploadFile_SendsMultipartFormData(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

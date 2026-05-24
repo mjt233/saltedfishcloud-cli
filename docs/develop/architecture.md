@@ -85,7 +85,7 @@ uid 缓存策略：首次需要私人网盘 `uid` 时调用 `/api/openApi/user/p
 ### 3.2 HTTP 客户端 (`internal/client`)
 
 ```go
-type ApiClient struct {
+type APIClient struct {
     baseURL    string
     apiTicket  string
     httpClient *http.Client
@@ -223,6 +223,8 @@ builds:
 | --- | --- |
 | 配置缺失（无 serviceUrl / apiTicket） | 启动时一次性检查，缺啥报啥，立即退出 |
 | 网络超时 / 连接拒绝 | 透传 Go 原生错误，附带目标 URL 提示 |
-| 业务错误（businessCode != 200） | 解析 `msg` 字段，格式化为用户可读的错误消息 |
+| 业务错误（businessCode != 0） | 解析 `msg` 字段，格式化为用户可读的错误消息 |
+| HTTP 状态码 >= 400 | 直接返回 HTTP 错误，不尝试解析 JSON 信封 |
+| 服务端错误（code != 200，无 businessCode） | 解析 `msg` 字段，格式化为用户可读的错误消息 |
 | 路径格式错误 | 在路径解析阶段即报错，附带正确的格式示例 |
 | 部分文件失败（递归操作） | 收集失败列表，命令结束时汇总报告，不因单文件失败中断整个操作 |

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 // APIClient 持有与咸鱼云服务通信所需的基础配置和可复用 HTTP 客户端。
@@ -26,13 +27,16 @@ type APIClient struct {
 
 // NewAPIClient 构造一个 APIClient 实例。
 // baseURL 会被规范化（去除末尾斜杠）；apiTicket 为空时请求不携带鉴权头。
+// 默认超时时间为 30 秒，防止请求长时间挂起。
 func NewAPIClient(baseURL, apiTicket string) *APIClient {
 	// 去除末尾斜杠，防止拼接路径时产生双斜杠
 	normalizedURL := strings.TrimRight(baseURL, "/")
 	return &APIClient{
-		baseURL:    normalizedURL,
-		apiTicket:  apiTicket,
-		httpClient: &http.Client{},
+		baseURL:   normalizedURL,
+		apiTicket: apiTicket,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 }
 
@@ -62,7 +66,9 @@ func (c *APIClient) buildURL(path string, query url.Values) string {
 }
 
 // doJSONRequest 执行 HTTP 请求并将标准信封响应解包到 out。
-// 若业务码非零（businessCode != 0），返回包含业务码和消息的错误。
+// 处理顺序：先检查 HTTP 状态码（>= 400 直接报错），再检查 businessCode，
+// 最后检查 code 是否为 200。businessCode 非零时返回业务错误；
+// code != 200 且 businessCode 为 0 时返回通用错误。
 func (c *APIClient) doJSONRequest(req *http.Request, out any) error {
 	// 注入鉴权头
 	c.addAuthHeader(req)
@@ -74,15 +80,25 @@ func (c *APIClient) doJSONRequest(req *http.Request, out any) error {
 	}
 	defer resp.Body.Close()
 
+	// HTTP 状态码 >= 400 时直接返回错误，不尝试解析 JSON 信封（可能来自网关/代理）
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("http error %d: %s", resp.StatusCode, resp.Status)
+	}
+
 	// 解析标准信封
 	var envelope apiEnvelope
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		return fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	// 检查业务层错误码（businessCode 非零视为错误）
+	// businessCode 非零时返回业务层错误（优先于 code 检查）
 	if envelope.BusinessCode != 0 {
 		return fmt.Errorf("business error %d: %s", envelope.BusinessCode, envelope.Msg)
+	}
+
+	// code != 200 且无 businessCode 时，视为通用错误（如服务端内部错误）
+	if envelope.Code != 200 {
+		return fmt.Errorf("server error %d: %s", envelope.Code, envelope.Msg)
 	}
 
 	// 将 data 字段解包到调用方提供的目标结构
@@ -128,15 +144,17 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 // DeleteJSON 向指定路径发送 DELETE 请求，携带可选查询参数和 JSON 请求体，
 // 并将响应信封中的 data 字段解包到 out。
 func (c *APIClient) DeleteJSON(ctx context.Context, path string, query url.Values, body any, out any) error {
-	// 序列化可选请求体
-	var buf bytes.Buffer
+	// 序列化可选请求体；body 为 nil 时使用 nil 而非空缓冲区，保持语义清晰
+	var reqBody io.Reader
 	if body != nil {
+		var buf bytes.Buffer
 		if err := json.NewEncoder(&buf).Encode(body); err != nil {
 			return fmt.Errorf("failed to encode request body: %w", err)
 		}
+		reqBody = &buf
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.buildURL(path, query), &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.buildURL(path, query), reqBody)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
