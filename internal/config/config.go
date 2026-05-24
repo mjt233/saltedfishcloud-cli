@@ -1,6 +1,6 @@
 // Package config 负责从配置文件、环境变量和命令行标志中加载并校验运行时配置。
 // 优先级固定为：命令行标志 > 环境变量 > ~/.config/sfc-cli/config.json。
-// 开发期间支持从当前工作目录的 .env 文件自动加载环境变量（需要 godotenv）。
+// 开发期间支持从当前工作目录的 .env 文件自动加载环境变量。
 package config
 
 import (
@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
+	"github.com/subosito/gotenv"
 )
 
 // Options 封装由命令行标志层传入的配置覆盖值。非空字段将以最高优先级覆盖环境变量和文件中的同名配置。
@@ -37,7 +37,7 @@ type Config struct {
 func Load(opts Options) (Config, error) {
 	// 尝试从当前工作目录加载 .env 文件，开发期间便于配置环境变量
 	// .env 文件不存在时静默忽略，不影响正常启动
-	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+	if err := gotenv.Load(); err != nil && !os.IsNotExist(err) {
 		// .env 文件存在但解析失败时，记录警告但不阻断启动
 		fmt.Fprintf(os.Stderr, "warning: failed to load .env file: %v\n", err)
 	}
