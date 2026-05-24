@@ -3,7 +3,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/mjt233/saltedfishcloud-cli/internal/client"
@@ -34,7 +33,7 @@ func newLSCommand() *cobra.Command {
 			diskSvc := service.NewDiskFileService(cli, paths)
 
 			// 查询远端目录列表
-			entries, err := diskSvc.List(context.Background(), args[0])
+			entries, err := diskSvc.List(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}

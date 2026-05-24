@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -83,5 +84,35 @@ func TestLSCommand_MissingArgsReturnsError(t *testing.T) {
 	// 缺少路径参数时应返回错误
 	if err := root.ExecuteContext(context.Background()); err == nil {
 		t.Fatal("expected error for missing path argument, got nil")
+	}
+}
+
+// TestLSCommand_RespectsContextCancellation 验证 ls 命令会透传执行上下文。
+func TestLSCommand_RespectsContextCancellation(t *testing.T) {
+	apiTicket = ""
+	serviceURL = ""
+	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("request should not be sent when command context is canceled")
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	root := NewRootCommand()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{
+		"--service-url", srv.URL,
+		"--api-ticket", "test-ticket",
+		"ls", "public:/demo",
+	})
+
+	err := root.ExecuteContext(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context canceled error, got %v", err)
 	}
 }
