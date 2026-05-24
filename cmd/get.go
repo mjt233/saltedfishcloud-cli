@@ -8,6 +8,7 @@ import (
 
 	"github.com/mjt233/saltedfishcloud-cli/internal/client"
 	"github.com/mjt233/saltedfishcloud-cli/internal/config"
+	"github.com/mjt233/saltedfishcloud-cli/internal/localfs"
 	"github.com/mjt233/saltedfishcloud-cli/internal/service"
 	"github.com/spf13/cobra"
 )
@@ -45,7 +46,7 @@ func newGetCommand() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				localPath = path.Base(rp.Path)
+				localPath = localfs.EnsureDownloadTarget(path.Base(rp.Path), "")
 				if localPath == "/" || localPath == "." || localPath == "" {
 					return fmt.Errorf("无法为远端路径 %q 推导默认本地目标，请显式指定 localPath", rp.Path)
 				}
