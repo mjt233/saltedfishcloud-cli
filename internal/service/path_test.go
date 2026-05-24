@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -98,6 +99,21 @@ func TestResolve_PrivateAreaExplicit(t *testing.T) {
 	}
 }
 
+// TestResolve_PrivateUIDErrorReturnsWrappedMessage 验证 privateUID 回调失败时返回保留中文前缀的包装错误。
+func TestResolve_PrivateUIDErrorReturnsWrappedMessage(t *testing.T) {
+	svc := NewPathService(func(ctx context.Context) (int64, error) {
+		return 0, errors.New("uid lookup failed")
+	})
+
+	_, err := svc.Resolve(context.Background(), "private:/my/file.txt")
+	if err == nil {
+		t.Fatal("expected error for privateUID callback failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "获取私有用户 UID 失败:") {
+		t.Fatalf("error should preserve wrapped Chinese prefix, got: %s", err.Error())
+	}
+}
+
 // TestResolve_InvalidAreaReturnsError 验证不支持的资源域返回包含预期格式提示的错误。
 func TestResolve_InvalidAreaReturnsError(t *testing.T) {
 	svc := NewPathService(func(ctx context.Context) (int64, error) {
@@ -107,6 +123,15 @@ func TestResolve_InvalidAreaReturnsError(t *testing.T) {
 	_, err := svc.Resolve(context.Background(), "ftp:/some/path")
 	if err == nil {
 		t.Fatal("expected error for invalid area, got nil")
+	}
+	if !strings.Contains(err.Error(), "ftp") {
+		t.Fatalf("error should mention invalid area value, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "local、private、public") {
+		t.Fatalf("error should mention valid options, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "[resourceArea:]") {
+		t.Fatalf("error should mention format hint, got: %s", err.Error())
 	}
 }
 
