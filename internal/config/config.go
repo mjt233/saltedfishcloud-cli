@@ -30,23 +30,20 @@ type Config struct {
 // Load 按照"标志 > 环境变量 > 配置文件"的优先级合并配置，
 // 并在必填字段缺失时一次性返回所有缺失字段的错误信息。
 func Load(opts Options) (Config, error) {
-	// 第一阶段：通过 Viper 读取配置文件中的基础值
-	fileServiceURL, fileAPITicket := loadFromFile()
+	// 第一阶段：初始化 Viper 实例，绑定配置文件与环境变量
+	v := newViper()
 
-	// 第二阶段：读取环境变量（前缀 SFC_），空值不覆盖低优先级来源
-	envServiceURL := os.Getenv("SFC_SERVICE_URL")
-	envAPITicket := os.Getenv("SFC_API_TICKET")
-
-	// 第三阶段：按优先级合并，空值跳过以保证低优先级来源的有效值不被清空
+	// 第二阶段：按优先级合并。空值不覆盖低优先级来源，
+	// 通过 os.LookupEnv 检测环境变量是否被显式设置且非空。
 	cfg := Config{
-		ServiceURL: fileServiceURL,
-		APITicket:  fileAPITicket,
+		ServiceURL: v.GetString("serviceUrl"),
+		APITicket:  v.GetString("apiTicket"),
 	}
-	if envServiceURL != "" {
-		cfg.ServiceURL = envServiceURL
+	if val, ok := os.LookupEnv("SFC_SERVICE_URL"); ok && val != "" {
+		cfg.ServiceURL = val
 	}
-	if envAPITicket != "" {
-		cfg.APITicket = envAPITicket
+	if val, ok := os.LookupEnv("SFC_API_TICKET"); ok && val != "" {
+		cfg.APITicket = val
 	}
 	if opts.ServiceURL != "" {
 		cfg.ServiceURL = opts.ServiceURL
@@ -55,7 +52,7 @@ func Load(opts Options) (Config, error) {
 		cfg.APITicket = opts.APITicket
 	}
 
-	// 第四阶段：校验必填字段，收集所有缺失项后一次性报错
+	// 第三阶段：校验必填字段，收集所有缺失项后一次性报错
 	var missing []string
 	if cfg.ServiceURL == "" {
 		missing = append(missing, "serviceUrl")
@@ -70,24 +67,28 @@ func Load(opts Options) (Config, error) {
 	return cfg, nil
 }
 
-// loadFromFile 使用 Viper 从 ~/.config/sfc-cli/config.json 中读取配置，
-// 文件不存在或读取失败时静默返回空字符串。
-func loadFromFile() (serviceURL, apiTicket string) {
+// newViper 构造并返回一个已配置好文件路径与环境变量绑定的 Viper 实例。
+// 读取 ~/.config/sfc-cli/config.json；文件不存在时静默忽略。
+func newViper() *viper.Viper {
+	v := viper.New()
+	v.SetEnvPrefix("SFC")
+	v.AutomaticEnv()
+	// 将 Viper 键名中的驼峰分隔映射到下划线分隔的环境变量
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	// 绑定具体环境变量，确保大小写不敏感的键名能正确解析
+	_ = v.BindEnv("serviceUrl", "SFC_SERVICE_URL")
+	_ = v.BindEnv("apiTicket", "SFC_API_TICKET")
+
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", ""
+		return v
 	}
 
-	// 构造配置文件的绝对路径
+	// 构造配置文件绝对路径并尝试加载，忽略文件不存在等非致命错误
 	cfgPath := filepath.Join(home, ".config", "sfc-cli", "config.json")
-
-	v := viper.New()
 	v.SetConfigFile(cfgPath)
+	_ = v.ReadInConfig()
 
-	// 忽略文件不存在等非致命错误
-	if err := v.ReadInConfig(); err != nil {
-		return "", ""
-	}
-
-	return v.GetString("serviceUrl"), v.GetString("apiTicket")
+	return v
 }

@@ -31,3 +31,29 @@ func TestNewRootCommand_FlagsBoundToPackageVars(t *testing.T) {
 		t.Errorf("serviceURL = %q, want %q", serviceURL, "http://sfc.example.com")
 	}
 }
+
+// TestRootOptions_ToConfigOptions 验证 rootOptions 的 toConfigOptions 方法
+// 能正确将自身字段转换为 config.Options。
+func TestRootOptions_ToConfigOptions(t *testing.T) {
+	ro := rootOptions{ServiceURL: "https://example.com", APITicket: "secret"}
+	co := ro.toConfigOptions()
+	if co.ServiceURL != "https://example.com" {
+		t.Errorf("ServiceURL = %q, want %q", co.ServiceURL, "https://example.com")
+	}
+	if co.APITicket != "secret" {
+		t.Errorf("APITicket = %q, want %q", co.APITicket, "secret")
+	}
+}
+
+// TestToConfigOptions_UsesRootOptions 验证包级 toConfigOptions 函数使用 rootOptions 的方法进行转换。
+func TestToConfigOptions_UsesRootOptions(t *testing.T) {
+	// 重置包级变量，再写入已知值
+	apiTicket = "pkg-ticket"
+	serviceURL = "https://pkg.example.com"
+	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+
+	co := toConfigOptions()
+	if co.ServiceURL != "https://pkg.example.com" || co.APITicket != "pkg-ticket" {
+		t.Fatalf("unexpected config options: %+v", co)
+	}
+}

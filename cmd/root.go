@@ -21,11 +21,24 @@ type rootOptions struct {
 }
 
 // toConfigOptions 将当前已解析的根命令标志值转换为 config.Options，供子命令构造 config.Config 使用。
-func toConfigOptions() config.Options {
+func (o rootOptions) toConfigOptions() config.Options {
 	return config.Options{
+		ServiceURL: o.ServiceURL,
+		APITicket:  o.APITicket,
+	}
+}
+
+// currentRootOptions 从包级标志变量构造一个 rootOptions 实例。
+func currentRootOptions() rootOptions {
+	return rootOptions{
 		ServiceURL: serviceURL,
 		APITicket:  apiTicket,
 	}
+}
+
+// toConfigOptions 从当前包级标志变量构造 config.Options，供子命令使用。
+func toConfigOptions() config.Options {
+	return currentRootOptions().toConfigOptions()
 }
 
 // NewRootCommand 构造并返回根 cobra 命令，并注册全局持久标志。
