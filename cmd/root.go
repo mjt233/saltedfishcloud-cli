@@ -54,6 +54,9 @@ func NewRootCommand() *cobra.Command {
 	root.PersistentFlags().StringVar(&apiTicket, "api-ticket", "", "用于鉴权的 API Ticket")
 	root.PersistentFlags().StringVar(&serviceURL, "service-url", "", "咸鱼云服务的基础 URL")
 
+	// 注册子命令
+	root.AddCommand(newLSCommand())
+
 	return root
 }
 
