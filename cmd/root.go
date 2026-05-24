@@ -15,7 +15,7 @@ var serviceURL string
 func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "sfc-cli",
-		Short:         "咸鱼云网盘 CLI 客户端",
+		Short:         "CLI client for Salted Fish Cloud",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
