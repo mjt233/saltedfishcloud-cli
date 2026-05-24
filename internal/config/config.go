@@ -1,5 +1,6 @@
 // Package config 负责从配置文件、环境变量和命令行标志中加载并校验运行时配置。
 // 优先级固定为：命令行标志 > 环境变量 > ~/.config/sfc-cli/config.json。
+// 开发期间支持从当前工作目录的 .env 文件自动加载环境变量（需要 godotenv）。
 package config
 
 import (
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
 
@@ -31,7 +33,15 @@ type Config struct {
 // Load 按照"标志 > 环境变量 > 配置文件"的优先级合并配置，
 // 并在必填字段缺失时一次性返回所有缺失字段的错误信息。
 // 配置文件不存在时静默忽略；文件存在但解析失败时返回错误。
+// 开发期间支持从当前工作目录的 .env 文件自动加载环境变量。
 func Load(opts Options) (Config, error) {
+	// 尝试从当前工作目录加载 .env 文件，开发期间便于配置环境变量
+	// .env 文件不存在时静默忽略，不影响正常启动
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+		// .env 文件存在但解析失败时，记录警告但不阻断启动
+		fmt.Fprintf(os.Stderr, "warning: failed to load .env file: %v\n", err)
+	}
+
 	// 第一阶段：分别初始化文件层和环境变量层的 Viper 实例。
 	fileViper, err := newFileViper()
 	if err != nil {

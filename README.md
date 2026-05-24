@@ -4,6 +4,25 @@
 
 ## 快速开始
 
+### 开发期间使用 .env 文件（推荐）
+
+开发期间可以通过 `.env` 文件自动加载环境变量，避免每次手动配置：
+
+1. 复制 `.env.example` 文件为 `.env`：
+   ```bash
+   cp .env.example .env
+   ```
+
+2. 编辑 `.env` 文件，填入实际的配置值：
+   ```bash
+   SFC_SERVICE_URL=http://saltedfishcloud-server-host
+   SFC_API_TICKET=your_actual_api_ticket
+   ```
+
+3. 程序启动时会自动从当前工作目录加载 `.env` 文件中的环境变量
+
+**注意**：`.env` 文件包含敏感信息，已被 `.gitignore` 忽略，不会提交到版本控制。
+
 ### 1. 配置服务地址
 
 - 方式1：配置环境变量`SFC_SERVICE_URL`
