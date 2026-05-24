@@ -56,6 +56,7 @@ func NewRootCommand() *cobra.Command {
 
 	// 注册子命令
 	root.AddCommand(newLSCommand())
+	root.AddCommand(newGetCommand())
 
 	return root
 }
