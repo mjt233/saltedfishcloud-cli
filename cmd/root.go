@@ -29,6 +29,5 @@ func NewRootCommand() *cobra.Command {
 
 // Execute 运行根命令并返回遇到的错误。
 func Execute() error {
-	// 构造并执行根命令
 	return NewRootCommand().Execute()
 }
