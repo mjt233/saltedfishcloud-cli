@@ -4,7 +4,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path"
 
 	"github.com/mjt233/saltedfishcloud-cli/internal/client"
@@ -128,9 +130,9 @@ func (s *CopierService) moveLocalToRemote(ctx context.Context, localPath, remote
 		return fmt.Errorf("上传 %q 到 %q 失败: %w", localPath, remoteTarget, err)
 	}
 
-	// 上传成功后删除本地源文件
-	if err := removeLocalFile(localPath); err != nil {
-		return fmt.Errorf("删除本地源文件 %q 失败: %w", localPath, err)
+	// 上传成功后删除本地源（目录使用 RemoveAll，文件使用 Remove）
+	if err := os.RemoveAll(localPath); err != nil {
+		return fmt.Errorf("删除本地源 %q 失败: %w", localPath, err)
 	}
 	return nil
 }
@@ -190,10 +192,7 @@ func (s *CopierService) resolveFileNames(ctx context.Context, rp ResolvedPath) (
 
 	// 检查是否为"路径非目录"业务错误
 	var bizErr *client.BusinessError
-	if bizErr2, ok := listErr.(*client.BusinessError); ok {
-		bizErr = bizErr2
-	}
-	if bizErr != nil && bizErr.BusinessCode == client.BusinessCodeNotADirectory {
+	if errors.As(listErr, &bizErr) && bizErr.BusinessCode == client.BusinessCodeNotADirectory {
 		// 单文件：返回基础名称
 		return []string{path.Base(rp.Path)}, nil
 	}

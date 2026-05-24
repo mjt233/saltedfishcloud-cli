@@ -85,15 +85,6 @@ func TestCopierService_CopyRemoteToRemote(t *testing.T) {
 // 先上传本地文件，成功后删除本地源文件。
 func TestCopierService_MoveLocalToRemote_RemovesSourceOnSuccess(t *testing.T) {
 	uploadCalled := false
-	var removedPaths []string
-
-	// 替换 removeLocalFile 以捕获删除行为
-	oldRemove := removeLocalFile
-	removeLocalFile = func(p string) error {
-		removedPaths = append(removedPaths, p)
-		return nil
-	}
-	t.Cleanup(func() { removeLocalFile = oldRemove })
 
 	// 启动测试服务器，模拟上传成功
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,9 +125,50 @@ func TestCopierService_MoveLocalToRemote_RemovesSourceOnSuccess(t *testing.T) {
 	if !uploadCalled {
 		t.Fatal("expected upload endpoint to be called")
 	}
-	// 验证本地源文件被删除
-	if len(removedPaths) != 1 || removedPaths[0] != localFile {
-		t.Fatalf("expected local source %q to be removed, got removedPaths=%v", localFile, removedPaths)
+	// 验证本地源文件已被 os.RemoveAll 删除
+	if _, statErr := os.Stat(localFile); !os.IsNotExist(statErr) {
+		t.Fatalf("expected local source %q to be removed, stat err=%v", localFile, statErr)
+	}
+}
+
+// TestCopierService_MoveLocalDirToRemote_RemovesSourceDir 验证 local 目录->remote 移动
+// 上传本地目录后，整个目录树被删除。
+func TestCopierService_MoveLocalDirToRemote_RemovesSourceDir(t *testing.T) {
+	// 启动测试服务器，模拟上传和创建目录成功
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 200,
+			"data": nil,
+			"msg":  "OK",
+		})
+	}))
+	defer srv.Close()
+
+	// 创建本地目录结构：base/sub/file.txt
+	base := t.TempDir()
+	subDir := filepath.Join(base, "sub")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	// 构造服务图
+	cli := client.NewAPIClient(srv.URL, "ticket-1")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	disk := NewDiskFileService(cli, paths)
+	copier := NewCopierService(cli, disk, paths)
+
+	// 执行移动：local 目录 -> public:/dest/
+	err := copier.Move(context.Background(), "local:"+base, "public:/dest/")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 验证整个本地目录树已被删除
+	if _, statErr := os.Stat(base); !os.IsNotExist(statErr) {
+		t.Fatalf("expected local dir %q to be removed, stat err=%v", base, statErr)
 	}
 }
 
