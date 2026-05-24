@@ -3,6 +3,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,12 +30,16 @@ type Config struct {
 
 // Load 按照"标志 > 环境变量 > 配置文件"的优先级合并配置，
 // 并在必填字段缺失时一次性返回所有缺失字段的错误信息。
+// 配置文件不存在时静默忽略；文件存在但解析失败时返回错误。
 func Load(opts Options) (Config, error) {
-	// 第一阶段：初始化 Viper 实例，绑定配置文件与环境变量
-	v := newViper()
+	// 第一阶段：初始化 Viper 实例，仅负责读取配置文件
+	v, err := newViper()
+	if err != nil {
+		return Config{}, fmt.Errorf("配置文件读取失败: %w", err)
+	}
 
-	// 第二阶段：按优先级合并。空值不覆盖低优先级来源，
-	// 通过 os.LookupEnv 检测环境变量是否被显式设置且非空。
+	// 第二阶段：按优先级合并。Viper 提供文件层的值；
+	// os.LookupEnv 仅在环境变量非空时才覆盖文件值，空字符串不覆盖。
 	cfg := Config{
 		ServiceURL: v.GetString("serviceUrl"),
 		APITicket:  v.GetString("apiTicket"),
@@ -67,28 +72,29 @@ func Load(opts Options) (Config, error) {
 	return cfg, nil
 }
 
-// newViper 构造并返回一个已配置好文件路径与环境变量绑定的 Viper 实例。
-// 读取 ~/.config/sfc-cli/config.json；文件不存在时静默忽略。
-func newViper() *viper.Viper {
+// newViper 构造并返回一个仅读取配置文件的 Viper 实例。
+// 读取 ~/.config/sfc-cli/config.json；文件不存在时静默忽略，
+// 文件存在但无法解析时返回错误。环境变量由 Load 通过 os.LookupEnv 显式处理。
+func newViper() (*viper.Viper, error) {
 	v := viper.New()
-	v.SetEnvPrefix("SFC")
-	v.AutomaticEnv()
-	// 将 Viper 键名中的驼峰分隔映射到下划线分隔的环境变量
-	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-
-	// 绑定具体环境变量，确保大小写不敏感的键名能正确解析
-	_ = v.BindEnv("serviceUrl", "SFC_SERVICE_URL")
-	_ = v.BindEnv("apiTicket", "SFC_API_TICKET")
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return v
+		// 无法获取家目录，跳过文件加载
+		return v, nil
 	}
 
-	// 构造配置文件绝对路径并尝试加载，忽略文件不存在等非致命错误
+	// 构造配置文件绝对路径并尝试加载
 	cfgPath := filepath.Join(home, ".config", "sfc-cli", "config.json")
 	v.SetConfigFile(cfgPath)
-	_ = v.ReadInConfig()
+	if err := v.ReadInConfig(); err != nil {
+		// 文件不存在属于正常情况，静默忽略
+		if errors.Is(err, os.ErrNotExist) {
+			return v, nil
+		}
+		// 其他错误（解析失败、权限不足等）需要向上传递
+		return nil, err
+	}
 
-	return v
+	return v, nil
 }
