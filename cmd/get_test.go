@@ -173,3 +173,61 @@ func TestGetCommand_MissingArgs_ReturnsError(t *testing.T) {
 		t.Fatal("expected error for missing path argument, got nil")
 	}
 }
+
+// TestGetCommand_DefaultLocalName_DerivedFromResolvedPath 验证当未指定本地路径时，
+// 下载目标名称从解析后的远端路径中提取，而非原始路径字符串；
+// 确保含资源域前缀但无前导斜杠的路径（如 "public:file.bin"）能正确派生出文件名。
+func TestGetCommand_DefaultLocalName_DerivedFromResolvedPath(t *testing.T) {
+	apiTicket = ""
+	serviceURL = ""
+	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/openApi/diskFile/fileList/v1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code":         200,
+				"businessCode": 40001,
+				"msg":          "path is not a directory",
+				"data":         nil,
+			})
+		case "/api/openApi/diskFile/download/v1":
+			_, _ = w.Write([]byte("content"))
+		}
+	}))
+	defer srv.Close()
+
+	// 切换到临时目录，使默认下载路径落在此处
+	base := t.TempDir()
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working dir: %v", err)
+	}
+	if err := os.Chdir(base); err != nil {
+		t.Fatalf("failed to chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+
+	root := NewRootCommand()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	// "public:remote-name.bin"（无前导斜杠）是触发 bug 的场景：
+	//   修复前：path.Base("public:remote-name.bin") = "public:remote-name.bin"（Windows 上因冒号非法而失败）
+	//   修复后：解析路径得 /remote-name.bin，path.Base 取得 "remote-name.bin"
+	root.SetArgs([]string{
+		"--service-url", srv.URL,
+		"--api-ticket", "test-ticket",
+		"get", "public:remote-name.bin", // 无本地目标路径
+	})
+
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 验证文件以正确名称（不含资源域前缀）存在于临时目录
+	expectedFile := filepath.Join(base, "remote-name.bin")
+	if _, statErr := os.Stat(expectedFile); statErr != nil {
+		t.Fatalf("expected file at %s, got: %v", expectedFile, statErr)
+	}
+}

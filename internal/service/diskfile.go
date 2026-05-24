@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -103,11 +104,18 @@ func (s *DiskFileService) Download(ctx context.Context, remotePath, localPath st
 		return fmt.Errorf("local 资源域不支持远端下载操作，请使用 private 或 public 域")
 	}
 
-	// 尝试列出路径内容；若成功则视为目录，否则视为文件
+	// 尝试列出路径内容；若成功则视为目录，否则检查错误类型
 	entries, listErr := s.listByResolved(ctx, rp)
 	if listErr == nil {
 		// 目录下载：递归处理所有条目
 		return s.downloadDir(ctx, rp, localPath, entries, out)
+	}
+
+	// 仅当业务错误码明确表示"路径非目录"时回退到文件下载；
+	// 其他错误（HTTP 错误、网络错误、鉴权失败、上下文取消等）直接返回，不进行回退。
+	var bizErr *client.BusinessError
+	if !errors.As(listErr, &bizErr) || bizErr.BusinessCode != client.BusinessCodeNotADirectory {
+		return listErr
 	}
 
 	// 文件下载：调用 download 接口并写入本地文件
@@ -116,7 +124,14 @@ func (s *DiskFileService) Download(ctx context.Context, remotePath, localPath st
 
 // downloadFile 从远端下载单个文件到本地路径。
 // 若 Content-Length 可用，会通过进度条展示下载进度。
+// 若 localPath 已是目录，文件将下载到该目录下以远端文件基础名命名的路径。
+// 若写入过程中出现错误，已创建的不完整文件会被自动删除。
 func (s *DiskFileService) downloadFile(ctx context.Context, rp ResolvedPath, localPath string, out io.Writer) error {
+	// 若 localPath 已是目录，将文件下载到该目录下以远端文件基础名命名的文件
+	if fi, statErr := os.Stat(localPath); statErr == nil && fi.IsDir() {
+		localPath = filepath.Join(localPath, path.Base(rp.Path))
+	}
+
 	// 构造下载接口查询参数
 	q := url.Values{
 		"uid":  {strconv.FormatInt(rp.UID, 10)},
@@ -140,7 +155,16 @@ func (s *DiskFileService) downloadFile(ctx context.Context, rp ResolvedPath, loc
 	if err != nil {
 		return fmt.Errorf("创建本地文件 %q 失败: %w", localPath, err)
 	}
-	defer f.Close()
+
+	// copyOK 标记写入是否成功；defer 负责关闭文件并在失败时删除不完整文件。
+	copyOK := false
+	defer func() {
+		f.Close()
+		if !copyOK {
+			// 下载失败时删除已创建的不完整文件，避免遗留损坏数据
+			_ = os.Remove(localPath)
+		}
+	}()
 
 	// 构造进度条，内容长度未知时（-1）以无限制模式运行
 	bar := progressbar.NewOptions64(
@@ -156,6 +180,7 @@ func (s *DiskFileService) downloadFile(ctx context.Context, rp ResolvedPath, loc
 	}
 	// 确保进度条显示完成状态
 	_ = bar.Finish()
+	copyOK = true
 	return nil
 }
 

@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestDoJSON_AddsApiTicketHeaderAndUnwrapsData 验证 GetJSON 正确注入鉴权头并从 data 字段解包响应。
@@ -372,5 +373,44 @@ func TestUploadFile_SendsMultipartFormData(t *testing.T) {
 	}
 	if !out.Uploaded {
 		t.Fatalf("expected Uploaded=true, got %v", out)
+	}
+}
+
+// TestDownload_UsesZeroTimeout 验证 Download 使用 Timeout=0 的克隆客户端，
+// 确保大文件 body 流式读取不受全局 HTTP 客户端超时限制。
+func TestDownload_UsesZeroTimeout(t *testing.T) {
+	const bodyDelay = 100 * time.Millisecond
+
+	// 启动测试服务器：立即刷新响应头，延迟 100ms 后写入 body
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if fl, ok := w.(http.Flusher); ok {
+			fl.Flush()
+		}
+		time.Sleep(bodyDelay)
+		_, _ = w.Write([]byte("slow"))
+	}))
+	defer srv.Close()
+
+	// 全局客户端超时（5ms）远短于 body 延迟（100ms）；
+	// 若 Download 直接使用该客户端，body 读取将超时失败。
+	cli := &APIClient{
+		baseURL:    srv.URL,
+		apiTicket:  "t",
+		httpClient: &http.Client{Timeout: 5 * time.Millisecond},
+	}
+
+	// Download 应使用 Timeout=0 的克隆客户端，body 读取不受 5ms 限制
+	resp, err := cli.Download(context.Background(), "/dl", nil)
+	if err != nil {
+		t.Fatalf("Download should not fail despite short httpClient.Timeout, got: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("body read should not timeout, got: %v", err)
+	}
+	if string(body) != "slow" {
+		t.Fatalf("unexpected body: %q", body)
 	}
 }

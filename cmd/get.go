@@ -8,7 +8,6 @@ import (
 
 	"github.com/mjt233/saltedfishcloud-cli/internal/client"
 	"github.com/mjt233/saltedfishcloud-cli/internal/config"
-	"github.com/mjt233/saltedfishcloud-cli/internal/localfs"
 	"github.com/mjt233/saltedfishcloud-cli/internal/service"
 	"github.com/spf13/cobra"
 )
@@ -30,19 +29,24 @@ func newGetCommand() *cobra.Command {
 
 			remotePath := args[0]
 
-			// 确定本地目标路径：若未指定，则使用远端路径的基础名称
-			var userTarget string
-			if len(args) == 2 {
-				userTarget = args[1]
-			}
-			// 提取远端路径的最后一段作为默认本地名称（使用正斜杠路径规则）
-			localPath := localfs.EnsureDownloadTarget(path.Base(remotePath), userTarget)
-
 			// 构造服务依赖图
 			cli := client.NewAPIClient(cfg.ServiceURL, cfg.APITicket)
 			userSvc := service.NewUserService(cli)
 			paths := service.NewPathService(userSvc.PrivateUID)
 			diskSvc := service.NewDiskFileService(cli, paths)
+
+			// 确定本地目标路径：若未指定，从解析后的远端路径中提取基础名称，
+			// 避免原始字符串含资源域前缀（如 "public:file.bin"）导致名称错误。
+			var localPath string
+			if len(args) == 2 {
+				localPath = args[1]
+			} else {
+				rp, err := paths.Resolve(cmd.Context(), remotePath)
+				if err != nil {
+					return err
+				}
+				localPath = path.Base(rp.Path)
+			}
 
 			// 执行下载（文件或目录均由 Download 内部检测处理）
 			if err := diskSvc.Download(cmd.Context(), remotePath, localPath, cmd.OutOrStdout()); err != nil {

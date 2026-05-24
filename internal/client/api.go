@@ -40,6 +40,23 @@ func NewAPIClient(baseURL, apiTicket string) *APIClient {
 	}
 }
 
+// BusinessError 表示后端返回的业务层错误，包含业务错误码和可读消息。
+// doJSONRequest 在 businessCode 非零时返回此类型，供调用方通过 errors.As 进行类型断言。
+type BusinessError struct {
+	// BusinessCode 是后端返回的业务错误码。
+	BusinessCode int
+	// Msg 是后端返回的可读错误消息。
+	Msg string
+}
+
+// Error 实现 error 接口，格式与原有字符串错误格式保持一致以确保向后兼容。
+func (e *BusinessError) Error() string {
+	return fmt.Sprintf("business error %d: %s", e.BusinessCode, e.Msg)
+}
+
+// BusinessCodeNotADirectory 是后端文件列表接口在目标路径不是目录时返回的业务错误码。
+const BusinessCodeNotADirectory = 40001
+
 // apiEnvelope 是咸鱼云标准 JSON 响应的信封结构。
 // /api/hello/feature 等特殊接口不使用此结构，单独处理。
 type apiEnvelope struct {
@@ -100,7 +117,7 @@ func (c *APIClient) doJSONRequest(req *http.Request, out any) error {
 
 	// businessCode 非零时返回业务层错误（优先于 code 检查）
 	if envelope.BusinessCode != 0 {
-		return fmt.Errorf("business error %d: %s", envelope.BusinessCode, envelope.Msg)
+		return &BusinessError{BusinessCode: envelope.BusinessCode, Msg: envelope.Msg}
 	}
 
 	// code != 200 且无 businessCode 时，视为通用错误（如服务端内部错误）
@@ -212,8 +229,13 @@ func (c *APIClient) Download(ctx context.Context, path string, query url.Values)
 	// 注入鉴权头
 	c.addAuthHeader(req)
 
+	// 克隆 HTTP 客户端并将超时设为 0，避免全局默认超时中断大文件流式下载；
+	// 超时控制改由调用方通过 context 实现。
+	streamClient := *c.httpClient
+	streamClient.Timeout = 0
+
 	// 直接返回响应，不进行 JSON 解析
-	resp, err := c.httpClient.Do(req)
+	resp, err := streamClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("http request failed: %w", err)
 	}

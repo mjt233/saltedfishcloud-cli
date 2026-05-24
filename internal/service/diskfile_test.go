@@ -267,3 +267,134 @@ func TestDiskFileService_Download_LocalArea_ReturnsError(t *testing.T) {
 		t.Fatalf("error should mention 'local', got: %s", err.Error())
 	}
 }
+
+// TestDiskFileService_Download_ListHTTPError_DoesNotFallback 验证当 fileList 接口返回
+// 非"路径非目录"错误（如 HTTP 500）时，Download 立即返回该错误，不回退到文件下载。
+func TestDiskFileService_Download_ListHTTPError_DoesNotFallback(t *testing.T) {
+	downloadCalled := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/openApi/diskFile/fileList/v1":
+			// HTTP 500 不是业务错误，不应触发回退
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("server error"))
+		case "/api/openApi/diskFile/download/v1":
+			downloadCalled = true
+			_, _ = w.Write([]byte("should not reach here"))
+		}
+	}))
+	defer srv.Close()
+
+	cli := client.NewAPIClient(srv.URL, "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	base := t.TempDir()
+	target := filepath.Join(base, "output.txt")
+
+	var buf bytes.Buffer
+	err := svc.Download(context.Background(), "public:/file.txt", target, &buf)
+	if err == nil {
+		t.Fatal("expected error when fileList returns HTTP 500, got nil")
+	}
+	if downloadCalled {
+		t.Fatal("download endpoint should not be called when fileList fails with HTTP error")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("error should mention HTTP 500, got: %s", err.Error())
+	}
+}
+
+// TestDiskFileService_Download_PartialFileCleanedUpOnFailure 验证下载失败（连接中断）时
+// 已创建的不完整本地文件会被自动删除。
+func TestDiskFileService_Download_PartialFileCleanedUpOnFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/openApi/diskFile/fileList/v1":
+			// 路径是文件，返回"非目录"业务错误以触发文件下载逻辑
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code":         200,
+				"businessCode": 40001,
+				"msg":          "path is not a directory",
+				"data":         nil,
+			})
+		case "/api/openApi/diskFile/download/v1":
+			// 劫持连接：声明 Content-Length=100 但只写入少量数据后关闭（模拟下载中断）
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				http.Error(w, "hijacking unsupported", http.StatusInternalServerError)
+				return
+			}
+			conn, bufW, _ := hj.Hijack()
+			// 发送声明长度为 100 的响应头，但 body 只写 7 字节
+			_, _ = bufW.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 100\r\n\r\npartial")
+			_ = bufW.Flush()
+			conn.Close() // 中断连接，触发客户端读取 body 时发生 unexpected EOF
+		}
+	}))
+	defer srv.Close()
+
+	cli := client.NewAPIClient(srv.URL, "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	base := t.TempDir()
+	target := filepath.Join(base, "partial.bin")
+
+	var buf bytes.Buffer
+	err := svc.Download(context.Background(), "public:/file.bin", target, &buf)
+	if err == nil {
+		t.Fatal("expected error for interrupted download, got nil")
+	}
+
+	// 验证不完整文件已被删除，不遗留损坏数据
+	if _, statErr := os.Stat(target); !os.IsNotExist(statErr) {
+		t.Fatalf("partial file should be cleaned up on failure, but it still exists at %s", target)
+	}
+}
+
+// TestDiskFileService_Download_ExistingDirectoryTarget_DownloadsIntoDir 验证当本地目标路径
+// 已是已存在目录时，单文件下载会进入该目录并使用远端文件的基础名称。
+func TestDiskFileService_Download_ExistingDirectoryTarget_DownloadsIntoDir(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/openApi/diskFile/fileList/v1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code":         200,
+				"businessCode": 40001,
+				"msg":          "path is not a directory",
+				"data":         nil,
+			})
+		case "/api/openApi/diskFile/download/v1":
+			_, _ = w.Write([]byte("file-content"))
+		}
+	}))
+	defer srv.Close()
+
+	cli := client.NewAPIClient(srv.URL, "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	// 创建一个已存在的目录作为下载目标
+	base := t.TempDir()
+	existingDir := filepath.Join(base, "downloads")
+	if err := os.MkdirAll(existingDir, 0755); err != nil {
+		t.Fatalf("failed to create existing dir: %v", err)
+	}
+
+	var buf bytes.Buffer
+	// 以已存在目录作为 localPath（而非文件路径）
+	if err := svc.Download(context.Background(), "public:/remote.txt", existingDir, &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 验证文件被下载到 existingDir/remote.txt
+	expectedFile := filepath.Join(existingDir, "remote.txt")
+	content, err := os.ReadFile(expectedFile)
+	if err != nil {
+		t.Fatalf("expected file at %s, got error: %v", expectedFile, err)
+	}
+	if string(content) != "file-content" {
+		t.Fatalf("expected content %q, got %q", "file-content", string(content))
+	}
+}
