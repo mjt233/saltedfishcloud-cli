@@ -283,6 +283,12 @@ type featureVersionResponse struct {
 	Version string `json:"version"`
 }
 
+// RemoteVersion 调用 /api/hello/feature 接口获取服务端版本号。
+// 内部委托 GetFeatureVersion 实现，对外提供更简洁的方法名。
+func (c *APIClient) RemoteVersion(ctx context.Context) (string, error) {
+	return c.GetFeatureVersion(ctx)
+}
+
 // GetFeatureVersion 调用 /api/hello/feature 接口，读取顶层 version 字段并返回。
 // 此接口不需要鉴权，且不使用标准信封格式。
 func (c *APIClient) GetFeatureVersion(ctx context.Context) (string, error) {

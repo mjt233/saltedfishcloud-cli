@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"github.com/mjt233/saltedfishcloud-cli/internal/client"
 	"github.com/mjt233/saltedfishcloud-cli/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -62,6 +63,8 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newRenameCommand())
 	root.AddCommand(newCpCommand())
 	root.AddCommand(newMvCommand())
+	root.AddCommand(newVersionCommand())
+	root.AddCommand(rootAddClientCommand("remoteVersion", newRemoteVersionCommand))
 
 	return root
 }
@@ -69,4 +72,19 @@ func NewRootCommand() *cobra.Command {
 // Execute 运行根命令并返回遇到的错误。
 func Execute() error {
 	return NewRootCommand().Execute()
+}
+
+// rootAddClientCommand 注册需要 API 客户端的子命令。
+// cmdName 为子命令名称，newCmd 为接收客户端工厂函数的命令工厂函数。
+// 内部构造延迟创建客户端的工厂，在命令实际执行时才加载配置并创建客户端。
+func rootAddClientCommand(cmdName string, newCmd func(newClient func(cmd *cobra.Command) (*client.APIClient, error)) *cobra.Command) *cobra.Command {
+	// 构造延迟客户端工厂：在命令执行时才根据标志值创建客户端
+	newClient := func(cmd *cobra.Command) (*client.APIClient, error) {
+		cfg, err := config.Load(toConfigOptions())
+		if err != nil {
+			return nil, err
+		}
+		return client.NewAPIClient(cfg.ServiceURL, cfg.APITicket), nil
+	}
+	return newCmd(newClient)
 }

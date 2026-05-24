@@ -72,3 +72,4 @@ sfc-cli
 ##### 其他操作
 
 - `version` - 查看当前cli程序版本
+- `remoteVersion` - 查询远端服务端版本号
