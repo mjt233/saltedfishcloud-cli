@@ -157,8 +157,11 @@ func (s *DiskFileService) Download(ctx context.Context, remotePath, localPath st
 	if err != nil {
 		return err
 	}
+	if entry == nil {
+		return fmt.Errorf("remote path %q does not exist", rp.Path)
+	}
 
-	if entry != nil && entry.Type == "dir" {
+	if entry.Type == "dir" {
 		// 目录下载：列出目录自身内容后递归处理
 		dirEntries, listErr := s.listByResolved(ctx, rp)
 		if listErr != nil {
