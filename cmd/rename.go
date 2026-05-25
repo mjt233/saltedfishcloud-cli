@@ -18,7 +18,7 @@ func newRenameCommand() *cobra.Command {
 		Use:   "rename <sourceResourcePath> <newName>",
 		Short: "Rename remote files or directories",
 		Long:  "Rename the file or directory at the specified remote path to a new name, supporting private and public resource areas.",
-		Args:  cobra.ExactArgs(2),
+		Args:  withArgsHelp(cobra.ExactArgs(2)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高
 			cfg, err := config.Load(toConfigOptions())

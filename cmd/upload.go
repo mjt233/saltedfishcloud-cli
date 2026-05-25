@@ -19,7 +19,7 @@ func newUploadCommand() *cobra.Command {
 		Use:   "upload <localPath> <remoteResourcePath>",
 		Short: "Upload local files or directories to remote",
 		Long:  "Upload local files or directories to the specified remote resource path, supporting private and public resource areas. Directories are uploaded recursively.",
-		Args:  cobra.ExactArgs(2),
+		Args:  withArgsHelp(cobra.ExactArgs(2)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高
 			cfg, err := config.Load(toConfigOptions())

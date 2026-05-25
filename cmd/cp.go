@@ -18,7 +18,7 @@ func newCpCommand() *cobra.Command {
 		Use:   "cp <sourceResourcePath> <targetResourcePath>",
 		Short: "Copy remote files or directories",
 		Long:  "Copy remote files or directories from source path to target path, supporting private and public resource areas.",
-		Args:  cobra.ExactArgs(2),
+		Args:  withArgsHelp(cobra.ExactArgs(2)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高
 			cfg, err := config.Load(toConfigOptions())

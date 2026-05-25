@@ -12,14 +12,21 @@ import (
 )
 
 // newLSCommand 构造并返回 ls 子命令。
-// ls 接受一个路径参数，以制表符分隔的表格形式列出远端目录内容。
+// ls 接受一个可选路径参数，以制表符分隔的表格形式列出远端目录内容；
+// 省略路径时默认列出根目录 /。
 func newLSCommand() *cobra.Command {
 	return &cobra.Command{
-		Use:   "ls <path>",
+		Use:   "ls [path]",
 		Short: "List remote directory contents",
-		Long:  "List files and directories under the specified remote path, supporting private and public resource areas.",
-		Args:  cobra.ExactArgs(1),
+		Long:  "List files and directories under the specified remote path, supporting private and public resource areas. Defaults to / when path is omitted.",
+		Args:  withArgsHelp(cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// 路径参数可选，省略时默认为根目录
+			targetPath := "/"
+			if len(args) == 1 {
+				targetPath = args[0]
+			}
+
 			// 加载运行时配置；命令行标志优先级最高
 			cfg, err := config.Load(toConfigOptions())
 			if err != nil {
@@ -33,7 +40,7 @@ func newLSCommand() *cobra.Command {
 			diskSvc := service.NewDiskFileService(cli, paths)
 
 			// 查询远端目录列表
-			entries, err := diskSvc.List(cmd.Context(), args[0])
+			entries, err := diskSvc.List(cmd.Context(), targetPath)
 			if err != nil {
 				return err
 			}

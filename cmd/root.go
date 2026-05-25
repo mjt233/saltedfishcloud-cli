@@ -64,7 +64,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newCpCommand())
 	root.AddCommand(newMvCommand())
 	root.AddCommand(newVersionCommand())
-	root.AddCommand(rootAddClientCommand("remoteVersion", newRemoteVersionCommand))
+	root.AddCommand(rootAddClientCommand("remote-version", newRemoteVersionCommand))
 
 	return root
 }

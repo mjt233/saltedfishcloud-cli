@@ -18,7 +18,7 @@ func newRmCommand() *cobra.Command {
 		Use:   "rm <targetResourcePath>",
 		Short: "Delete remote files or directories",
 		Long:  "Delete files or directories at the specified remote path, supporting private and public resource areas.",
-		Args:  cobra.ExactArgs(1),
+		Args:  withArgsHelp(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高
 			cfg, err := config.Load(toConfigOptions())

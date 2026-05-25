@@ -19,7 +19,7 @@ func newMvCommand() *cobra.Command {
 		Use:   "mv <sourceResourcePath> <targetResourcePath>",
 		Short: "Move remote files or directories",
 		Long:  "Move files or directories from source path to target path, supporting remote-to-remote, local-to-remote, and remote-to-local.",
-		Args:  cobra.ExactArgs(2),
+		Args:  withArgsHelp(cobra.ExactArgs(2)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高
 			cfg, err := config.Load(toConfigOptions())

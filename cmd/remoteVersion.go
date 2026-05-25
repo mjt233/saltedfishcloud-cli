@@ -1,5 +1,5 @@
 // Package cmd 定义 sfc-cli 的全部 CLI 命令。
-// 当前文件实现 remoteVersion 子命令，查询远端服务版本号。
+// 当前文件实现 remote-version 子命令，查询远端服务版本号。
 package cmd
 
 import (
@@ -9,14 +9,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newRemoteVersionCommand 创建 remoteVersion 子命令。
+// newRemoteVersionCommand 创建 remote-version 子命令。
 // 调用 /api/hello/feature 获取服务端版本号并输出。
 // 注意：该接口返回体顶层有 version 字段，不在 data 中。
 func newRemoteVersionCommand(newClient func(cmd *cobra.Command) (*client.APIClient, error)) *cobra.Command {
 	return &cobra.Command{
-		Use:   "remoteVersion",
+		Use:   "remote-version",
 		Short: "Query server version",
-		Args:  cobra.NoArgs,
+		Args:  withArgsHelp(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 通过工厂函数构造 API 客户端
 			cli, err := newClient(cmd)

@@ -20,7 +20,7 @@ func newGetCommand() *cobra.Command {
 		Use:   "get <remoteResourcePath> [localPath]",
 		Short: "Download remote files or directories",
 		Long:  "Download files or directories from the specified remote path to local, supporting private and public resource areas. Directories are downloaded recursively.",
-		Args:  cobra.RangeArgs(1, 2),
+		Args:  withArgsHelp(cobra.RangeArgs(1, 2)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// 加载运行时配置；命令行标志优先级最高
 			cfg, err := config.Load(toConfigOptions())

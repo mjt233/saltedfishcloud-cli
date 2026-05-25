@@ -17,7 +17,7 @@ func newVersionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print current CLI version",
-		Args:  cobra.NoArgs,
+		Args:  withArgsHelp(cobra.NoArgs),
 		Run: func(cmd *cobra.Command, args []string) {
 			// 将版本号写入标准输出
 			fmt.Fprintln(cmd.OutOrStdout(), version)

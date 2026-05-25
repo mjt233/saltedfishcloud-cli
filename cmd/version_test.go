@@ -47,7 +47,7 @@ func TestRemoteVersionCommand_PrintsServerVersion(t *testing.T) {
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
 	root.SetErr(buf)
-	root.SetArgs([]string{"--service-url", srv.URL, "--api-ticket", "dummy", "remoteVersion"})
+	root.SetArgs([]string{"--service-url", srv.URL, "--api-ticket", "dummy", "remote-version"})
 
 	if err := root.Execute(); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
@@ -69,19 +69,45 @@ func TestRemoteVersionCommand_MissingArgsReturnsError(t *testing.T) {
 	root.SetOut(buf)
 	root.SetErr(buf)
 	// 传入多余参数，应触发 NoArgs 校验
-	root.SetArgs([]string{"--service-url", "http://localhost:9999", "remoteVersion", "extra-arg"})
+	root.SetArgs([]string{"--service-url", "http://localhost:9999", "remote-version", "extra-arg"})
 
 	if err := root.Execute(); err == nil {
 		t.Fatal("expected error for extra arguments, got nil")
 	}
 }
 
-// TestVersionCommand_NoArgs 验证 version 命令不接受额外参数。
-func TestVersionCommand_NoArgs(t *testing.T) {
+// TestRemoteVersionCommand_UsesKebabCaseName 验证根命令以 remote-version（kebab-case）注册子命令，
+// 且参数数量错误时输出含 remote-version 的帮助文本。
+func TestRemoteVersionCommand_UsesKebabCaseName(t *testing.T) {
+	root := NewRootCommand()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"remote-version", "extra-arg"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected error for extra arguments, got nil")
+	}
+	if !strings.Contains(buf.String(), "Usage:\n  sfc-cli remote-version") {
+		t.Fatalf("expected remote-version help text, got:\n%s", buf.String())
+	}
+}
+
+// TestVersionCommand_NoArgsPrintsHelpOnArgError 验证 version 命令在收到多余参数时
+// 先输出帮助文本再返回错误。
+func TestVersionCommand_NoArgsPrintsHelpOnArgError(t *testing.T) {
 	cmd := newVersionCommand()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
 	cmd.SetArgs([]string{"extra-arg"})
 
-	if err := cmd.Execute(); err == nil {
+	err := cmd.Execute()
+	if err == nil {
 		t.Fatal("expected error for extra arguments, got nil")
+	}
+	if !strings.Contains(buf.String(), "Usage:") {
+		t.Fatalf("expected help output, got:\n%s", buf.String())
 	}
 }

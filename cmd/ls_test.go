@@ -65,25 +65,45 @@ func TestLSCommand_OutputsTableHeaderAndRow(t *testing.T) {
 	}
 }
 
-// TestLSCommand_MissingArgsReturnsError 验证 ls 命令在缺少路径参数时返回错误。
-func TestLSCommand_MissingArgsReturnsError(t *testing.T) {
+// TestLSCommand_DefaultsToRootPath 验证 ls 命令在不传路径参数时默认请求根目录 /。
+func TestLSCommand_DefaultsToRootPath(t *testing.T) {
 	apiTicket = ""
 	serviceURL = ""
 	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+
+	// 记录文件列表接口收到的 path 查询参数
+	requestedPath := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 用户资料接口：返回 profileData 格式，提供私有 UID
+		if r.URL.Path == "/api/openApi/user/profile/v1" {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 200,
+				"data": map[string]any{"id": "1"},
+				"msg":  "OK",
+			})
+			return
+		}
+		// 文件列表接口：记录 path 参数并返回空列表
+		requestedPath = r.URL.Query().Get("path")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 200,
+			"data": []map[string]any{},
+			"msg":  "OK",
+		})
+	}))
+	defer srv.Close()
 
 	root := NewRootCommand()
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{
-		"--service-url", "http://localhost:9999",
-		"--api-ticket", "test-ticket",
-		"ls",
-	})
+	root.SetArgs([]string{"--service-url", srv.URL, "--api-ticket", "test-ticket", "ls"})
 
-	// 缺少路径参数时应返回错误
-	if err := root.ExecuteContext(context.Background()); err == nil {
-		t.Fatal("expected error for missing path argument, got nil")
+	if err := root.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if requestedPath != "/" {
+		t.Fatalf("requested path = %q, want /", requestedPath)
 	}
 }
 
