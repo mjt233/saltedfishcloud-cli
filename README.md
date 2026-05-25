@@ -25,11 +25,10 @@
 
 ### 1. 配置服务地址
 
-- 方式1：配置环境变量`SFC_SERVICE_URL`
-- 方式2：使用命令行参数`--service-url=<serviceUrl>`手动指定
-- 方式3：手动修改配置文件
-  文件配置: `~/.config/sfc-cli/config.json`（如果没有可手动创建）
-  配置内容：
+- 方式1：使用命令行参数 `--service-url=<serviceUrl>` 手动指定
+- 方式2：配置环境变量 `SFC_SERVICE_URL`
+- 方式3：手动修改配置文件 `~/.config/sfc-cli/config.json`（如果没有可手动创建）
+  配置文件中的键名保持为 `serviceUrl`：
   ```json
   {
     "serviceUrl": "service http url"
@@ -41,16 +40,17 @@
 
 #### 手动配置永久有效的 ApiTicket
 
-- 方式1：配置环境变量`SFC_API_TICKET`
-- 方式2：使用命令行参数`--api-ticket=<apiTicket>`手动指定
-- 方式3：手动修改配置文件
-  文件配置: `~/.config/sfc-cli/config.json`（如果没有可手动创建）
-  配置内容：
+- 方式1：使用命令行参数 `--api-ticket=<apiTicket>` 手动指定
+- 方式2：配置环境变量 `SFC_API_TICKET`
+- 方式3：手动修改配置文件 `~/.config/sfc-cli/config.json`（如果没有可手动创建）
+  配置文件中的键名保持为 `apiTicket`：
   ```json
   {
     "apiTicket": "your permanent api ticket"
   }
   ```
+
+当缺少 `service-url` 或 `api-ticket` 时，CLI 会直接提示以上三种配置方式，帮助定位缺失项。
 
 
 ### 3. 命令与参数
@@ -76,11 +76,13 @@ sfc-cli
 | public | 远程，公共网盘 |
 | local | 本地文件系统 |
 
-#### command 与 args参考
+#### command 与 args 参考
+
+- 命令层在参数个数不符合要求时，会先输出当前命令帮助文本，再返回参数错误。
 
 ##### 文件操作
 
-- `ls <path>` - 列出指定目录下的文件列表
+- `ls [path]` - 列出指定目录下的文件列表，未指定时默认使用 `/`
 - `get <remoteResourcePath> [localPath]` - 把远程网盘资源下载到本地（支持文件夹/单文件）。`localPath`未指定时，文件下载到当前工作目录。
 - `upload <localPath> <remoteResourcePath>` - 把本地文件/文件夹上传到远程。`remoteResourcePath`只能接受远程资源域。
 - `cp <sourceResourcePath> <targetResourcePath>` - 复制文件，支持跨资源域操作。当`sourceResourcePath`的资源域为`local`时，`targetResourcePath`为`public`或`private`时，则等价于`upload`操作。
@@ -91,4 +93,4 @@ sfc-cli
 ##### 其他操作
 
 - `version` - 查看当前cli程序版本
-- `remoteVersion` - 查询远端服务端版本号
+- `remote-version` - 查询远端服务端版本号

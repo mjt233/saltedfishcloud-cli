@@ -55,7 +55,7 @@ github.com/schollz/progressbar # 终端进度条
 | 层 | 目录 | 职责 | 依赖方向 |
 | --- | --- | --- | --- |
 | 入口层 | `main.go` | 初始化 cobra 根命令，调用 `Execute()` | → cmd |
-| 命令层 | `cmd/` | 解析参数、校验输入、调用 service 层、格式化输出 | → internal |
+| 命令层 | `cmd/` | 解析参数、校验输入、调用 service 层、格式化输出；参数个数错误时先输出当前命令帮助文本再返回错误 | → internal |
 | 服务层 | `internal/service/` | 实现业务编排：路径解析、uid 映射、递归上传/下载、跨资源域复制 | → client, localfs |
 | 客户端层 | `internal/client/` | 封装 HTTP 请求，统一注入 `Authorization: ApiTicket`，处理响应体解包 | 无外部依赖 |
 | 配置层 | `internal/config/` | 读取并合并 `--api-ticket` / `SFC_API_TICKET` / `~/.config/sfc-cli/config.json`；缓存 `uid` | → client |
@@ -79,6 +79,8 @@ github.com/schollz/progressbar # 终端进度条
   "apiTicket": "eyJhbGci..."
 }
 ```
+
+当缺少 `service-url` 或 `api-ticket` 时，配置层会一次性指出缺失项，并提示可通过命令行参数、环境变量或 `~/.config/sfc-cli/config.json` 配置；配置文件键名仍为 `serviceUrl`、`apiTicket`。
 
 uid 缓存策略：首次需要私人网盘 `uid` 时调用 `/api/openApi/user/profile/v1`，结果缓存在内存中，整个命令生命周期内复用。
 
@@ -125,11 +127,11 @@ type ResolvedPath struct {
 
 | 命令 | 默认输出 |
 | --- | --- |
-| `ls` | 表格式：`type  name  size  mtime` |
+| `ls [path]` | 表格式：`type  name  size  mtime`；未传 `path` 时默认列出 `/` |
 | `get` / `upload` | 进度条 + 完成提示 |
 | `rm` / `rename` / `cp` / `mv` | 简单的成功/失败文本 |
 | `version` | 版本号（构建时注入） |
-| `remoteVersion` | 远程版本号 |
+| `remote-version` | 远程版本号 |
 
 ## 4. 项目目录结构
 
@@ -207,7 +209,7 @@ builds:
 
 | 命令 | 优先级 | 说明 |
 | --- | --- | --- |
-| `ls` | P0 | 基础能力，验证整个调用链路 |
+| `ls [path]` | P0 | 基础能力，验证整个调用链路；未传 `path` 时默认列出 `/` |
 | `get`（单文件 + 目录） | P0 | CLI 核心价值 |
 | `upload`（单文件 + 目录） | P0 | CLI 核心价值 |
 | `rm` | P0 | 基础文件操作 |
@@ -215,13 +217,13 @@ builds:
 | `cp` | P1 | 跨资源域是差异化能力 |
 | `mv` | P1 | 跨资源域是差异化能力 |
 | `version` | P1 | 简单，构建时注入 |
-| `remoteVersion` | P2 | 匿名接口，验证连通性 |
+| `remote-version` | P2 | 匿名接口，验证连通性 |
 
 ## 7. 错误处理策略
 
 | 错误类型 | 处理方式 |
 | --- | --- |
-| 配置缺失（无 serviceUrl / apiTicket） | 启动时一次性检查，缺啥报啥，立即退出 |
+| 配置缺失（无 `service-url` / `api-ticket`） | 启动时一次性检查，缺啥报啥，提示 flags / 环境变量 / 配置文件路径与键名，随后立即退出 |
 | 网络超时 / 连接拒绝 | 透传 Go 原生错误，附带目标 URL 提示 |
 | 业务错误（businessCode != 0） | 解析 `msg` 字段，格式化为用户可读的错误消息 |
 | HTTP 状态码 >= 400 | 直接返回 HTTP 错误，不尝试解析 JSON 信封 |
