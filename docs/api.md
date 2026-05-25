@@ -91,7 +91,7 @@ README 定义了 3 个资源域：
 | `cp <localPath> <remoteResourcePath>` | 基本可行 | `profile`（仅 private）、`mkdir`、`upload` | 可在客户端把复制退化为上传 |
 | `mv <localPath> <remoteResourcePath>` | 基本可行 | `profile`（仅 private）、`mkdir`、`upload` | 可先上传，成功后由 CLI 删除本地源文件 |
 | `version` | 是 | 无 | 读取 CLI 本地版本，不依赖远程接口 |
-| `remoteVersion` | 是 | `/api/hello/feature` | 匿名请求即可；直接读取响应体中的 `version` 字段 |
+| `remote-version` | 是 | `/api/hello/feature` | 匿名请求即可；直接读取响应体中的 `version` 字段 |
 
 ## 5. 建议的最小实现范围
 
@@ -105,7 +105,7 @@ README 定义了 3 个资源域：
 - `cp`
 - `mv`
 - `version`
-- `remoteVersion`
+- `remote-version`
 
 ## 6. ApiTicket 权限要求
 
@@ -127,4 +127,4 @@ README 定义了 3 个资源域：
 6. `copy` / `move` 已支持 `sourceUid` 和 `targetUid`，旧的 Query `uid` 仅作为兼容参数。
 7. 公共网盘与私人网盘通过 `uid` 区分，而不是通过不同接口路径区分。
 8. `download.md` 和 `download-link.md` 的示例请求头仍写的是 `Bearer YOUR_ACCESS_TOKEN`，但开放接口总说明要求统一使用 `Authorization: ApiTicket {api_ticket}`，CLI 实现应以总说明为准。
-9. `remoteVersion` 走 `/api/hello/feature`，它既不需要授权，也不使用 `data` 包装，解析方式与 OpenAPI 接口不同。
+9. `remote-version` 走 `/api/hello/feature`，它既不需要授权，也不使用 `data` 包装，解析方式与 OpenAPI 接口不同。

@@ -24,5 +24,5 @@
 | 接口类型 | 返回体形态 | CLI 解析注意点 |
 | --- | --- | --- |
 | OAuth / OpenAPI JSON 接口 | `{"code":200,"data":...,"msg":"OK"}` | 实际业务数据从 `data` 字段读取 |
-| `/api/hello/feature` | 直接返回对象，例如 `{"version":"3.1.2.0-RELEASE"}` | 不包在 `data` 中，`remoteVersion` 直接读取顶层 `version` |
+| `/api/hello/feature` | 直接返回对象，例如 `{"version":"3.1.2.0-RELEASE"}` | 不包在 `data` 中，`remote-version` 直接读取顶层 `version` |
 | `/api/openApi/diskFile/download/v1` | 二进制文件流 | 不按 JSON 解析，直接写入本地文件 |
