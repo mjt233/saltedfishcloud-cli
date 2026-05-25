@@ -47,7 +47,7 @@
 
 - P0：`ls`、`get`、`upload`、`rm`、`rename`
 - P1：`cp`、`mv`、`version`
-- P2：`remoteVersion`
+- P2：`remote-version`
 
 如用户要求从零开始搭建或补全实现，默认优先保证 P0 链路完整，再处理 P1/P2。
 
