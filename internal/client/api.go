@@ -47,11 +47,13 @@ type BusinessError struct {
 	BusinessCode int
 	// Msg 是后端返回的可读错误消息。
 	Msg string
+	// URL 是请求的接口地址。
+	URL string
 }
 
 // Error 实现 error 接口，格式与原有字符串错误格式保持一致以确保向后兼容。
 func (e *BusinessError) Error() string {
-	return fmt.Sprintf("business error %d: %s", e.BusinessCode, e.Msg)
+	return fmt.Sprintf("business error %d: %s [%s]", e.BusinessCode, e.Msg, e.URL)
 }
 
 // BusinessCodeNotADirectory 是后端文件列表接口在目标路径不是目录时返回的业务错误码。
@@ -82,10 +84,10 @@ func (c *APIClient) buildURL(path string, query url.Values) string {
 	return u
 }
 
-// checkHTTPStatus 在响应状态码 >= 400 时返回错误。
+// checkHTTPStatus 在响应状态码 >= 400 时返回错误，错误消息中包含请求地址。
 func checkHTTPStatus(resp *http.Response) error {
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("http error %d: %s", resp.StatusCode, resp.Status)
+		return fmt.Errorf("http error %d: %s [%s]", resp.StatusCode, resp.Status, resp.Request.URL)
 	}
 	return nil
 }
@@ -101,7 +103,7 @@ func (c *APIClient) doJSONRequest(req *http.Request, out any) error {
 	// 发起请求
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("http request failed: %w", err)
+		return fmt.Errorf("http request failed: %w [%s]", err, req.URL)
 	}
 	defer resp.Body.Close()
 
@@ -112,23 +114,23 @@ func (c *APIClient) doJSONRequest(req *http.Request, out any) error {
 	// 解析标准信封
 	var envelope apiEnvelope
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
-		return fmt.Errorf("failed to decode response: %w", err)
+		return fmt.Errorf("failed to decode response: %w [%s]", err, req.URL)
 	}
 
 	// businessCode 非零且非 200（成功）时返回业务层错误（优先于 code 检查）
 	if envelope.BusinessCode != 0 && envelope.BusinessCode != 200 {
-		return &BusinessError{BusinessCode: envelope.BusinessCode, Msg: envelope.Msg}
+		return &BusinessError{BusinessCode: envelope.BusinessCode, Msg: envelope.Msg, URL: req.URL.String()}
 	}
 
 	// code != 200 且无 businessCode 时，视为通用错误（如服务端内部错误）
 	if envelope.Code != 200 {
-		return fmt.Errorf("server error %d: %s", envelope.Code, envelope.Msg)
+		return fmt.Errorf("server error %d: %s [%s]", envelope.Code, envelope.Msg, req.URL)
 	}
 
 	// 将 data 字段解包到调用方提供的目标结构
 	if out != nil && len(envelope.Data) > 0 {
 		if err := json.Unmarshal(envelope.Data, out); err != nil {
-			return fmt.Errorf("failed to unmarshal data: %w", err)
+			return fmt.Errorf("failed to unmarshal data: %w [%s]", err, req.URL)
 		}
 	}
 	return nil
@@ -268,7 +270,7 @@ func (c *APIClient) Download(ctx context.Context, path string, query url.Values)
 	// 直接返回响应，不进行 JSON 解析
 	resp, err := streamClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("http request failed: %w", err)
+		return nil, fmt.Errorf("http request failed: %w [%s]", err, req.URL)
 	}
 	if err := checkHTTPStatus(resp); err != nil {
 		resp.Body.Close()
@@ -300,7 +302,7 @@ func (c *APIClient) GetFeatureVersion(ctx context.Context) (string, error) {
 	// 发起请求（不注入鉴权头，该接口为公开接口）
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("http request failed: %w", err)
+		return "", fmt.Errorf("http request failed: %w [%s]", err, req.URL)
 	}
 	defer resp.Body.Close()
 
@@ -311,7 +313,7 @@ func (c *APIClient) GetFeatureVersion(ctx context.Context) (string, error) {
 	// 直接解析顶层 version 字段
 	var result featureVersionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to decode feature version response: %w", err)
+		return "", fmt.Errorf("failed to decode feature version response: %w [%s]", err, req.URL)
 	}
 	return result.Version, nil
 }
