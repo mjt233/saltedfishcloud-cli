@@ -124,8 +124,24 @@ func TestLoad_ReportsAllMissingFields(t *testing.T) {
 	unsetenv(t, "SFC_API_TICKET")
 
 	_, err := Load(Options{})
-	if err == nil || err.Error() != "missing required config: serviceUrl, apiTicket" {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected missing config error, got nil")
+	}
+
+	msg := err.Error()
+	for _, want := range []string{
+		"missing required config: service-url, api-ticket",
+		"--service-url",
+		"--api-ticket",
+		"SFC_SERVICE_URL",
+		"SFC_API_TICKET",
+		"~/.config/sfc-cli/config.json",
+		"serviceUrl",
+		"apiTicket",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q missing %q", msg, want)
+		}
 	}
 }
 
@@ -137,7 +153,10 @@ func TestLoad_ReportsSingleMissingField(t *testing.T) {
 	unsetenv(t, "SFC_API_TICKET")
 
 	_, err := Load(Options{})
-	if err == nil || err.Error() != "missing required config: apiTicket" {
+	if err == nil {
+		t.Fatal("expected missing config error, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing required config: api-ticket") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -71,13 +71,19 @@ func Load(opts Options) (Config, error) {
 	// 第三阶段：校验必填字段，收集所有缺失项后一次性报错
 	var missing []string
 	if cfg.ServiceURL == "" {
-		missing = append(missing, "serviceUrl")
+		missing = append(missing, "service-url")
 	}
 	if cfg.APITicket == "" {
-		missing = append(missing, "apiTicket")
+		missing = append(missing, "api-ticket")
 	}
 	if len(missing) > 0 {
-		return Config{}, fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
+		return Config{}, fmt.Errorf(
+			"missing required config: %s\n"+
+				"configure with flags: --service-url, --api-ticket\n"+
+				"or environment: SFC_SERVICE_URL, SFC_API_TICKET\n"+
+				"or config file: ~/.config/sfc-cli/config.json (keys: serviceUrl, apiTicket)",
+			strings.Join(missing, ", "),
+		)
 	}
 
 	return cfg, nil
