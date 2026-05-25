@@ -4,7 +4,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -179,24 +178,25 @@ func (s *CopierService) moveRemoteToRemote(ctx context.Context, srcRP, tgtRP Res
 // resolveFileNames 根据源路径获取要操作的文件名列表。
 // 若源路径是目录，列出其所有条目并返回文件名；若是文件，返回单元素数组。
 func (s *CopierService) resolveFileNames(ctx context.Context, rp ResolvedPath) ([]string, error) {
-	// 尝试列出路径内容；若成功则视为目录
-	entries, listErr := s.disk.listByResolved(ctx, rp)
-	if listErr == nil {
-		// 目录：收集所有条目名称
-		names := make([]string, 0, len(entries))
-		for _, e := range entries {
+	// 列出父目录并查找目标条目，根据条目类型判断是目录还是文件
+	entry, _, err := s.disk.findEntryInParent(ctx, rp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file list for source path %q: %w", rp.Path, err)
+	}
+
+	if entry != nil && entry.Type == "dir" {
+		// 目录：列出该目录自身的条目
+		dirEntries, listErr := s.disk.listByResolved(ctx, rp)
+		if listErr != nil {
+			return nil, fmt.Errorf("failed to list directory %q: %w", rp.Path, listErr)
+		}
+		names := make([]string, 0, len(dirEntries))
+		for _, e := range dirEntries {
 			names = append(names, e.Name)
 		}
 		return names, nil
 	}
 
-	// 检查是否为"路径非目录"业务错误
-	var bizErr *client.BusinessError
-	if errors.As(listErr, &bizErr) && bizErr.BusinessCode == client.BusinessCodeNotADirectory {
-		// 单文件：返回基础名称
-		return []string{path.Base(rp.Path)}, nil
-	}
-
-	// 其他错误直接返回
-	return nil, fmt.Errorf("failed to get file list for source path %q: %w", rp.Path, listErr)
+	// 文件或未找到匹配条目：返回基础名称
+	return []string{path.Base(rp.Path)}, nil
 }

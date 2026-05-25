@@ -133,7 +133,8 @@ func (s *DiskFileService) listByResolved(ctx context.Context, rp ResolvedPath) (
 // localPath 是本地目标路径：若远端是文件，localPath 为目标文件路径；若远端是目录，localPath 为目标目录路径。
 // out 用于输出进度信息等用户可见内容，为 nil 时进度信息将被丢弃。
 //
-// 文件与目录的检测策略：先尝试列出 remotePath；若列表成功，视为目录递归下载；若列表失败，视为文件直接下载。
+// 文件与目录的检测策略：列出 remotePath 的父目录，从列表中查找目标条目，
+// 根据条目的 dir 字段判断路径类型为"文件"还是"目录"。
 func (s *DiskFileService) Download(ctx context.Context, remotePath, localPath string, out io.Writer) error {
 	// 解析资源路径，提前检查域合法性
 	rp, err := s.paths.Resolve(ctx, remotePath)
@@ -151,22 +152,56 @@ func (s *DiskFileService) Download(ctx context.Context, remotePath, localPath st
 		out = io.Discard
 	}
 
-	// 尝试列出路径内容；若成功则视为目录，否则检查错误类型
-	entries, listErr := s.listByResolved(ctx, rp)
-	if listErr == nil {
-		// 目录下载：递归处理所有条目
-		return s.downloadDir(ctx, rp, localPath, entries, out)
+	// 列出父目录内容，从列表中查找目标条目以判断路径类型
+	entry, _, err := s.findEntryInParent(ctx, rp)
+	if err != nil {
+		return err
 	}
 
-	// 仅当业务错误码明确表示"路径非目录"时回退到文件下载；
-	// 其他错误（HTTP 错误、网络错误、鉴权失败、上下文取消等）直接返回，不进行回退。
-	var bizErr *client.BusinessError
-	if !errors.As(listErr, &bizErr) || bizErr.BusinessCode != client.BusinessCodeNotADirectory {
-		return listErr
+	if entry != nil && entry.Type == "dir" {
+		// 目录下载：列出目录自身内容后递归处理
+		dirEntries, listErr := s.listByResolved(ctx, rp)
+		if listErr != nil {
+			return fmt.Errorf("failed to list directory %q: %w", rp.Path, listErr)
+		}
+		return s.downloadDir(ctx, rp, localPath, dirEntries, out)
 	}
 
 	// 文件下载：调用 download 接口并写入本地文件
 	return s.downloadFile(ctx, rp, localPath, out)
+}
+
+// findEntryInParent 列出目标路径的父目录，从条目列表中查找与目标名称匹配的条目。
+// 返回值：entry 为匹配到的条目（未找到时为 nil）；entries 为父目录的完整条目列表；
+// 当父目录列出失败或目标路径为根路径时返回错误。
+func (s *DiskFileService) findEntryInParent(ctx context.Context, rp ResolvedPath) (*DiskEntry, []DiskEntry, error) {
+	// 计算父目录路径和目标条目名称
+	parentPath := path.Dir(rp.Path)
+	baseName := path.Base(rp.Path)
+
+	// 根路径无法作为文件处理
+	if baseName == "/" || baseName == "." {
+		return nil, nil, fmt.Errorf("cannot download root path as a file")
+	}
+
+	// 构造父目录的 ResolvedPath
+	parentRp := ResolvedPath{Area: rp.Area, UID: rp.UID, Path: parentPath}
+
+	// 列出父目录内容
+	entries, err := s.listByResolved(ctx, parentRp)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to list parent directory %q: %w", parentPath, err)
+	}
+
+	// 在条目列表中查找目标名称
+	for i := range entries {
+		if entries[i].Name == baseName {
+			return &entries[i], entries, nil
+		}
+	}
+
+	// 未找到匹配条目，返回 nil 表示条目不存在（仍返回列表供调用方参考）
+	return nil, entries, nil
 }
 
 // downloadFile 从远端下载单个文件到本地路径。

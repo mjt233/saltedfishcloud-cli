@@ -127,16 +127,17 @@ func TestDiskFileService_List_ReturnsErrorForLocalArea(t *testing.T) {
 
 // TestDiskFileService_Download_SingleFile_WritesContent 验证单文件下载将远端内容写入本地文件。
 func TestDiskFileService_Download_SingleFile_WritesContent(t *testing.T) {
-	// 启动测试服务器：fileList 接口返回业务错误（路径是文件而非目录），download 接口返回文件内容
+	// 启动测试服务器：fileList 返回父目录条目列表（包含目标文件），download 返回文件内容
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
-			// 返回业务错误，表明该路径不是目录
+			// 父目录 "/" 的条目列表，目标文件以 dir=false 标识
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{
+					{"name": "file.txt", "dir": false, "size": "12", "mtime": "1778581444799"},
+				},
+				"msg": "OK",
 			})
 		case "/api/openApi/diskFile/download/v1":
 			w.Header().Set("Content-Length", "12")
@@ -172,14 +173,23 @@ func TestDiskFileService_Download_SingleFile_WritesContent(t *testing.T) {
 // TestDiskFileService_Download_Directory_RecursivelyCreatesFiles 验证目录下载会递归创建所有文件。
 func TestDiskFileService_Download_Directory_RecursivelyCreatesFiles(t *testing.T) {
 	// 启动测试服务器：
-	// - /dir 的 fileList 返回一个文件和一个子目录
-	// - /dir/subdir 的 fileList 返回一个文件
+	// - path=/（父目录）返回 dir 条目
+	// - path=/dir 列出目录自身内容
+	// - path=/dir/subdir 列出子目录内容
 	// - download 接口按路径返回不同内容
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
 			reqPath := r.URL.Query().Get("path")
 			switch reqPath {
+			case "/":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"code": 200,
+					"data": []map[string]any{
+						{"name": "dir", "dir": true, "size": "-1", "mtime": "1778581444799"},
+					},
+					"msg": "OK",
+				})
 			case "/dir":
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"code": 200,
@@ -198,13 +208,7 @@ func TestDiskFileService_Download_Directory_RecursivelyCreatesFiles(t *testing.T
 					"msg": "OK",
 				})
 			default:
-				// 其他路径视为文件，返回业务错误
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"code":         200,
-					"businessCode": 40001,
-					"msg":          "not a directory",
-					"data":         nil,
-				})
+				http.Error(w, "unexpected path: "+reqPath, http.StatusBadRequest)
 			}
 		case "/api/openApi/diskFile/download/v1":
 			reqPath := r.URL.Query().Get("path")
@@ -270,8 +274,8 @@ func TestDiskFileService_Download_LocalArea_ReturnsError(t *testing.T) {
 	}
 }
 
-// TestDiskFileService_Download_ListHTTPError_DoesNotFallback 验证当 fileList 接口返回
-// 非"路径非目录"错误（如 HTTP 500）时，Download 立即返回该错误，不回退到文件下载。
+// TestDiskFileService_Download_ListHTTPError_DoesNotFallback 验证当父目录 fileList 接口返回
+// HTTP 错误（如 HTTP 500）时，Download 立即返回该错误，不回退到文件下载。
 func TestDiskFileService_Download_ListHTTPError_DoesNotFallback(t *testing.T) {
 	downloadCalled := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -313,12 +317,13 @@ func TestDiskFileService_Download_PartialFileCleanedUpOnFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
-			// 路径是文件，返回"非目录"业务错误以触发文件下载逻辑
+			// 父目录 "/" 的条目列表，目标文件以 dir=false 标识
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{
+					{"name": "file.bin", "dir": false, "size": "100", "mtime": "1778581444799"},
+				},
+				"msg": "OK",
 			})
 		case "/api/openApi/diskFile/download/v1":
 			// 劫持连接：声明 Content-Length=100 但只写入少量数据后关闭（模拟下载中断）
@@ -367,11 +372,13 @@ func TestDiskFileService_Download_PartialFileCleanupFailureIsReported(t *testing
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
+			// 父目录 "/" 的条目列表，目标文件以 dir=false 标识
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{
+					{"name": "file.bin", "dir": false, "size": "100", "mtime": "1778581444799"},
+				},
+				"msg": "OK",
 			})
 		case "/api/openApi/diskFile/download/v1":
 			hj, ok := w.(http.Hijacker)
@@ -413,11 +420,13 @@ func TestDiskFileService_Download_ExistingDirectoryTarget_DownloadsIntoDir(t *te
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
+			// 父目录 "/" 的条目列表，目标文件以 dir=false 标识
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{
+					{"name": "remote.txt", "dir": false, "size": "12", "mtime": "1778581444799"},
+				},
+				"msg": "OK",
 			})
 		case "/api/openApi/diskFile/download/v1":
 			_, _ = w.Write([]byte("file-content"))

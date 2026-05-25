@@ -56,9 +56,6 @@ func (e *BusinessError) Error() string {
 	return fmt.Sprintf("business error %d: %s [%s]", e.BusinessCode, e.Msg, e.URL)
 }
 
-// BusinessCodeNotADirectory 是后端文件列表接口在目标路径不是目录时返回的业务错误码。
-const BusinessCodeNotADirectory = 40001
-
 // apiEnvelope 是咸鱼云标准 JSON 响应的信封结构。
 // /api/hello/feature 等特殊接口不使用此结构，单独处理。
 type apiEnvelope struct {

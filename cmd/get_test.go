@@ -20,15 +20,17 @@ func TestGetCommand_DownloadsFile_ContentMatchesExpected(t *testing.T) {
 	serviceURL = ""
 	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
 
-	// 启动测试服务器：fileList 返回业务错误（路径是文件），download 返回文件内容
+	// 启动测试服务器：fileList 返回父目录条目（路径是文件），download 返回文件内容
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
+			// 父目录 "/" 的条目列表，目标文件以 dir=false 标识
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{
+					{"name": "file.txt", "dir": false, "size": "12", "mtime": "1778581444799"},
+				},
+				"msg": "OK",
 			})
 		case "/api/openApi/diskFile/download/v1":
 			w.Header().Set("Content-Length", "12")
@@ -73,12 +75,20 @@ func TestGetCommand_DownloadsDirectory_CreatesNestedFiles(t *testing.T) {
 	serviceURL = ""
 	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
 
-	// 启动测试服务器：/dir 有一个文件和一个子目录
+	// 启动测试服务器：/ 有 dir 目录，/dir 有一个文件和一个子目录
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
 			reqPath := r.URL.Query().Get("path")
 			switch reqPath {
+			case "/":
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"code": 200,
+					"data": []map[string]any{
+						{"name": "dir", "dir": true, "size": "-1", "mtime": "1778581444799"},
+					},
+					"msg": "OK",
+				})
 			case "/dir":
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"code": 200,
@@ -97,12 +107,7 @@ func TestGetCommand_DownloadsDirectory_CreatesNestedFiles(t *testing.T) {
 					"msg": "OK",
 				})
 			default:
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"code":         200,
-					"businessCode": 40001,
-					"msg":          "not a directory",
-					"data":         nil,
-				})
+				http.Error(w, "unexpected path: "+reqPath, http.StatusBadRequest)
 			}
 		case "/api/openApi/diskFile/download/v1":
 			reqPath := r.URL.Query().Get("path")
@@ -186,11 +191,13 @@ func TestGetCommand_DefaultLocalName_DerivedFromResolvedPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
+			// 父目录 "/" 的条目列表，目标文件以 dir=false 标识
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{
+					{"name": "remote-name.bin", "dir": false, "size": "7", "mtime": "1778581444799"},
+				},
+				"msg": "OK",
 			})
 		case "/api/openApi/diskFile/download/v1":
 			_, _ = w.Write([]byte("content"))
@@ -243,11 +250,11 @@ func TestGetCommand_DefaultLocalName_RejectsUnsafeRootPath(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
+			// 根目录 "/" 的条目列表
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{},
+				"msg":  "OK",
 			})
 		case "/api/openApi/diskFile/download/v1":
 			_, _ = w.Write([]byte("content"))
@@ -269,7 +276,9 @@ func TestGetCommand_DefaultLocalName_RejectsUnsafeRootPath(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsafe default local path, got nil")
 	}
-	if !strings.Contains(err.Error(), "specify localPath explicitly") {
-		t.Fatalf("error should request explicit localPath, got: %s", err.Error())
+	// 根路径无法推导文件名，错误可能来自 Download（"cannot download root path"）
+	// 或来自本地路径推导（"specify localPath explicitly"）
+	if !strings.Contains(err.Error(), "root path") && !strings.Contains(err.Error(), "specify localPath explicitly") {
+		t.Fatalf("error should mention root path issue or request explicit localPath, got: %s", err.Error())
 	}
 }

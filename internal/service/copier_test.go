@@ -24,12 +24,13 @@ func TestCopierService_CopyRemoteToRemote(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
-			// 返回业务错误，表明路径是文件而非目录
+			// 父目录 "/src" 的条目列表，目标文件以 dir=false 标识
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{
+					{"name": "file.txt", "dir": false, "size": "100", "mtime": "1778581444799"},
+				},
+				"msg": "OK",
 			})
 		case "/api/openApi/diskFile/copy/v1":
 			_ = json.NewDecoder(r.Body).Decode(&gotBody)
@@ -177,15 +178,17 @@ func TestCopierService_MoveLocalDirToRemote_RemovesSourceDir(t *testing.T) {
 func TestCopierService_MoveRemoteToLocal_RemovesSourceOnSuccess(t *testing.T) {
 	deleteCalled := false
 
-	// 启动测试服务器：fileList 返回"非目录"业务错误，download 返回文件内容，delete 记录调用
+	// 启动测试服务器：fileList 返回父目录条目，download 返回文件内容，delete 记录调用
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
+			// 父目录 "/" 的条目列表，目标文件以 dir=false 标识
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{
+					{"name": "remote.txt", "dir": false, "size": "14", "mtime": "1778581444799"},
+				},
+				"msg": "OK",
 			})
 		case "/api/openApi/diskFile/download/v1":
 			_, _ = w.Write([]byte("remote content"))
@@ -257,12 +260,13 @@ func TestCopierService_MoveRemoteToRemote_SendsCorrectBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
-			// 返回业务错误，表明路径是文件而非目录
+			// 父目录 "/src" 的条目列表，目标文件以 dir=false 标识
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{
+					{"name": "file.txt", "dir": false, "size": "100", "mtime": "1778581444799"},
+				},
+				"msg": "OK",
 			})
 		case "/api/openApi/diskFile/move/v1":
 			_ = json.NewDecoder(r.Body).Decode(&gotBody)

@@ -171,15 +171,17 @@ func TestCpCommand_ExecutesCopy(t *testing.T) {
 	copyCalled := false
 	var gotBody map[string]any
 
-	// 启动测试服务器：fileList 返回"非目录"业务错误，copy 捕获请求
+	// 启动测试服务器：fileList 返回父目录条目，copy 捕获请求
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
+			// 父目录 "/src" 的条目列表，目标文件以 dir=false 标识
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{
+					{"name": "file.txt", "dir": false, "size": "100", "mtime": "1778581444799"},
+				},
+				"msg": "OK",
 			})
 		case "/api/openApi/diskFile/copy/v1":
 			copyCalled = true
@@ -250,15 +252,17 @@ func TestMvCommand_ExecutesMove(t *testing.T) {
 	moveCalled := false
 	var gotBody map[string]any
 
-	// 启动测试服务器：fileList 返回"非目录"业务错误，move 捕获请求
+	// 启动测试服务器：fileList 返回父目录条目，move 捕获请求
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
+			// 父目录 "/src" 的条目列表，目标文件以 dir=false 标识
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{
+					{"name": "file.txt", "dir": false, "size": "100", "mtime": "1778581444799"},
+				},
+				"msg": "OK",
 			})
 		case "/api/openApi/diskFile/move/v1":
 			moveCalled = true
@@ -385,15 +389,17 @@ func TestMvCommand_RemoteToLocal_RemovesRemoteSource(t *testing.T) {
 
 	deleteCalled := false
 
-	// 启动测试服务器：fileList 返回"非目录"业务错误，download 返回内容，delete 记录调用
+	// 启动测试服务器：fileList 返回父目录条目，download 返回内容，delete 记录调用
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/openApi/diskFile/fileList/v1":
+			// 父目录 "/" 的条目列表，目标文件以 dir=false 标识
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"code":         200,
-				"businessCode": 40001,
-				"msg":          "path is not a directory",
-				"data":         nil,
+				"code": 200,
+				"data": []map[string]any{
+					{"name": "remote.txt", "dir": false, "size": "14", "mtime": "1778581444799"},
+				},
+				"msg": "OK",
 			})
 		case "/api/openApi/diskFile/download/v1":
 			_, _ = w.Write([]byte("remote content"))
