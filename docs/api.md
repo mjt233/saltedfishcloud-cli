@@ -14,9 +14,12 @@
 CLI 暂不负责获取 ApiTicket，启动前由用户手动提供永久有效的 ApiTicket。业务接口统一要求：
 
 ```http
-Authorization: ApiTicket {api_ticket}
+Authorization: Bearer {api_ticket}
 Content-Type: application/json
 ```
+
+> 注意：当前后端开放接口已迁移至 OIDC access token 鉴权，仅接受标准的 `Bearer` 方案；
+> 旧文档中的 `Authorization: ApiTicket {api_ticket}` 方案不再被后端接受，CLI 已同步改为发送 `Bearer`。
 
 返回体约定：
 
@@ -120,11 +123,13 @@ README 定义了 3 个资源域：
 ## 7. 开发时的关键注意事项
 
 1. CLI 当前只接受用户手动提供的永久 ApiTicket，不负责申请或刷新票据。
-2. 业务接口统一使用 `ApiTicket`，不能把 AccessToken 当作业务接口认证头。
+2. 业务接口统一通过 `Authorization: Bearer {token}` 鉴权；配置项 `apiTicket` 的值即为携带的 token（当前后端要求 OIDC access token）。
 3. 私人网盘操作依赖 `profile` 接口返回的用户 `id` 作为后续存储接口的 `uid`。
 4. 目录上传和目录下载都不是单独接口能力，需要 CLI 分别递归组合 `mkdir + upload` 与 `fileList + download`。
 5. 删除、复制、移动、重命名都依赖“目录路径 + 文件名”的参数拆分，CLI 需要统一的远程路径解析逻辑。
 6. `copy` / `move` 已支持 `sourceUid` 和 `targetUid`，旧的 Query `uid` 仅作为兼容参数。
 7. 公共网盘与私人网盘通过 `uid` 区分，而不是通过不同接口路径区分。
-8. `download.md` 和 `download-link.md` 的示例请求头仍写的是 `Bearer YOUR_ACCESS_TOKEN`，但开放接口总说明要求统一使用 `Authorization: ApiTicket {api_ticket}`，CLI 实现应以总说明为准。
+8. `download.md` 和 `download-link.md` 的示例请求头写的是 `Bearer YOUR_ACCESS_TOKEN`，当前后端开放接口确实统一使用 `Authorization: Bearer {token}` 方案，CLI 已按此实现。
 9. `remote-version` 走 `/api/hello/feature`，它既不需要授权，也不使用 `data` 包装，解析方式与 OpenAPI 接口不同。
+10. `upload/v1` 会拒绝空文件（`file.isEmpty()` 时返回 `{"code":400,"msg":"文件为空"}`，HTTP 状态仍为 200），CLI 在目录上传时跳过 0 字节文件并输出警告。
+11. `mkdir/v1` 对已存在的目录是幂等的（物理层 `Files.createDirectories`，元数据层逐段补建、已存在即复用），目录上传中断后可直接重试。

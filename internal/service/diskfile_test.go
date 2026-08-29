@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/mjt233/saltedfishcloud-cli/internal/client"
@@ -463,17 +464,19 @@ func TestDiskFileService_Download_ExistingDirectoryTarget_DownloadsIntoDir(t *te
 }
 
 // TestDiskFileService_Remove_SplitsParentAndName 验证 Remove 将路径拆分为父目录和文件名，
-// 并发送 DELETE 请求到 /api/openApi/diskFile/delete/v1，body 包含文件名数组。
+// 并发送 DELETE 请求到 /api/openApi/diskFile/delete/v1，body 为 {"fileName": [...]} 对象结构。
 func TestDiskFileService_Remove_SplitsParentAndName(t *testing.T) {
 	var gotMethod, gotPath, gotUID string
-	var gotNames []string
+	var gotBody struct {
+		FileName []string `json:"fileName"`
+	}
 
 	// 启动测试服务器，捕获 DELETE 请求的参数和 body
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
 		gotPath = r.URL.Query().Get("path")
 		gotUID = r.URL.Query().Get("uid")
-		_ = json.NewDecoder(r.Body).Decode(&gotNames)
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 200,
 			"data": nil,
@@ -507,9 +510,9 @@ func TestDiskFileService_Remove_SplitsParentAndName(t *testing.T) {
 	if gotUID != "42" {
 		t.Fatalf("expected uid=42, got %q", gotUID)
 	}
-	// 验证 body 包含文件名数组
-	if len(gotNames) != 1 || gotNames[0] != "file.txt" {
-		t.Fatalf("expected names=[file.txt], got %v", gotNames)
+	// 验证 body 为 {"fileName": ["file.txt"]} 对象结构
+	if len(gotBody.FileName) != 1 || gotBody.FileName[0] != "file.txt" {
+		t.Fatalf("expected body fileName=[file.txt], got %v", gotBody.FileName)
 	}
 }
 
@@ -773,5 +776,240 @@ func TestDiskFileService_Upload_Directory_CreatesDirsBeforeUploadingFiles(t *tes
 	if mkdirIdx >= nestedIdx {
 		t.Fatalf("expected mkdir:sub (idx=%d) before upload:nested.txt (idx=%d); seq=%v",
 			mkdirIdx, nestedIdx, seq)
+	}
+}
+
+// TestDiskFileService_Upload_Directory_SkipsEmptyFilesWithWarning 验证目录上传时
+// 0 字节空文件被跳过并输出警告（后端会拒绝空文件），其余文件正常上传。
+func TestDiskFileService_Upload_Directory_SkipsEmptyFilesWithWarning(t *testing.T) {
+	var uploadedNames []string
+	var mu sync.Mutex
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/openApi/diskFile/upload/v1" {
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusBadRequest)
+			return
+		}
+		if err := r.ParseMultipartForm(1 << 20); err == nil {
+			if fh := r.MultipartForm.File["file"]; len(fh) > 0 {
+				mu.Lock()
+				uploadedNames = append(uploadedNames, fh[0].Filename)
+				mu.Unlock()
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": nil, "msg": "OK"})
+	}))
+	defer srv.Close()
+
+	// 本地目录：keep.txt 有内容，empty.bin 为 0 字节
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "keep.txt"), []byte("data"), 0644); err != nil {
+		t.Fatalf("failed to create keep.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "empty.bin"), nil, 0644); err != nil {
+		t.Fatalf("failed to create empty.bin: %v", err)
+	}
+
+	cli := client.NewAPIClient(srv.URL, "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	var buf bytes.Buffer
+	if err := svc.Upload(context.Background(), root, "public:/dest", &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 只有 keep.txt 被上传
+	if len(uploadedNames) != 1 || uploadedNames[0] != "keep.txt" {
+		t.Fatalf("expected uploaded=[keep.txt], got %v", uploadedNames)
+	}
+	// 警告信息出现在输出中
+	if !strings.Contains(buf.String(), `skip empty file "empty.bin"`) {
+		t.Fatalf("expected skip warning in output, got: %s", buf.String())
+	}
+}
+
+// TestDiskFileService_Upload_Directory_SkipsSymlinksWithWarning 验证目录上传时
+// 符号链接条目被跳过并输出警告，不会因读取链接目录内容而失败。无符号链接权限的环境跳过本测试。
+func TestDiskFileService_Upload_Directory_SkipsSymlinksWithWarning(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.txt"), []byte("ok"), 0644); err != nil {
+		t.Fatalf("failed to create ok.txt: %v", err)
+	}
+	target := t.TempDir()
+	// 指向目录的符号链接：Walk 不跟随，若被当作文件上传会在读取内容时失败
+	if err := os.Symlink(target, filepath.Join(root, "linkdir")); err != nil {
+		t.Skipf("symlink unavailable in this environment: %v", err)
+	}
+
+	var uploadedNames []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/openApi/diskFile/upload/v1" {
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusBadRequest)
+			return
+		}
+		if err := r.ParseMultipartForm(1 << 20); err == nil {
+			if fh := r.MultipartForm.File["file"]; len(fh) > 0 {
+				uploadedNames = append(uploadedNames, fh[0].Filename)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": nil, "msg": "OK"})
+	}))
+	defer srv.Close()
+
+	cli := client.NewAPIClient(srv.URL, "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	var buf bytes.Buffer
+	if err := svc.Upload(context.Background(), root, "public:/dest", &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 只有 ok.txt 被上传，符号链接被跳过
+	if len(uploadedNames) != 1 || uploadedNames[0] != "ok.txt" {
+		t.Fatalf("expected uploaded=[ok.txt], got %v", uploadedNames)
+	}
+	if !strings.Contains(buf.String(), `skip symlink/junction "linkdir"`) {
+		t.Fatalf("expected symlink skip warning in output, got: %s", buf.String())
+	}
+}
+
+// TestDiskFileService_Upload_Directory_ContinuesAfterFailureAndSummarizes 验证目录上传中
+// 单文件失败不中止整体：其余文件继续上传，结束后输出汇总，并返回含失败明细的聚合错误。
+func TestDiskFileService_Upload_Directory_ContinuesAfterFailureAndSummarizes(t *testing.T) {
+	var uploadedNames []string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/openApi/diskFile/mkdir/v1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": nil, "msg": "OK"})
+		case "/api/openApi/diskFile/upload/v1":
+			if err := r.ParseMultipartForm(1 << 20); err == nil {
+				if fh := r.MultipartForm.File["file"]; len(fh) > 0 {
+					name := fh[0].Filename
+					uploadedNames = append(uploadedNames, name)
+					if name == "bad.txt" {
+						// 模拟后端拒绝该文件（如空文件返回 code=400）
+						_ = json.NewEncoder(w).Encode(map[string]any{"code": 400, "data": nil, "msg": "文件为空"})
+						return
+					}
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": nil, "msg": "OK"})
+		default:
+			http.Error(w, "unexpected path: "+r.URL.Path, http.StatusBadRequest)
+		}
+	}))
+	defer srv.Close()
+
+	// 本地目录：bad.txt 会被服务端拒绝，good.txt 与 sub/nested.txt 应继续上传
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "bad.txt"), []byte("bad"), 0644); err != nil {
+		t.Fatalf("failed to create bad.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "good.txt"), []byte("good"), 0644); err != nil {
+		t.Fatalf("failed to create good.txt: %v", err)
+	}
+	subDir := filepath.Join(root, "sub")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatalf("failed to create sub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "nested.txt"), []byte("nested"), 0644); err != nil {
+		t.Fatalf("failed to create nested.txt: %v", err)
+	}
+
+	cli := client.NewAPIClient(srv.URL, "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	var buf bytes.Buffer
+	err := svc.Upload(context.Background(), root, "public:/dest", &buf)
+	if err == nil {
+		t.Fatal("expected aggregated error for failed file, got nil")
+	}
+	// 聚合错误包含失败计数
+	if !strings.Contains(err.Error(), "1 failure") {
+		t.Fatalf("error should mention failure count, got: %s", err.Error())
+	}
+	// 其余文件仍被上传
+	for _, want := range []string{"good.txt", "nested.txt"} {
+		found := false
+		for _, got := range uploadedNames {
+			if got == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected %s to be uploaded despite bad.txt failure; uploaded=%v", want, uploadedNames)
+		}
+	}
+	// 汇总与失败明细出现在输出中（good.txt 与 nested.txt 成功，bad.txt 失败）
+	if !strings.Contains(buf.String(), "2 succeeded, 0 skipped, 1 failed") {
+		t.Fatalf("expected summary line in output, got: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "bad.txt") {
+		t.Fatalf("expected failed file name in output, got: %s", buf.String())
+	}
+}
+
+// TestDiskFileService_Upload_Directory_EmptyDirWarnsNothingUploaded 验证上传空目录时
+// 不发起任何请求，输出警告并成功返回。
+func TestDiskFileService_Upload_Directory_EmptyDirWarnsNothingUploaded(t *testing.T) {
+	requestHit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestHit = true
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": nil, "msg": "OK"})
+	}))
+	defer srv.Close()
+
+	cli := client.NewAPIClient(srv.URL, "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	emptyDir := t.TempDir()
+	var buf bytes.Buffer
+	if err := svc.Upload(context.Background(), emptyDir, "public:/dest", &buf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 不应发起任何请求
+	if requestHit {
+		t.Fatal("no request should be made for empty local directory")
+	}
+	if !strings.Contains(buf.String(), "empty, nothing to upload") {
+		t.Fatalf("expected empty-dir warning in output, got: %s", buf.String())
+	}
+}
+
+// TestDiskFileService_Upload_SingleFile_RejectsRemoteRootPath 验证单文件上传到远端根路径时
+// 返回明确的客户端校验错误，且不发起任何 HTTP 请求。
+func TestDiskFileService_Upload_SingleFile_RejectsRemoteRootPath(t *testing.T) {
+	requestHit := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestHit = true
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": nil, "msg": "OK"})
+	}))
+	defer srv.Close()
+
+	cli := client.NewAPIClient(srv.URL, "t")
+	paths := NewPathService(func(ctx context.Context) (int64, error) { return 0, nil })
+	svc := NewDiskFileService(cli, paths)
+
+	localFile := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(localFile, []byte("content"), 0644); err != nil {
+		t.Fatalf("failed to create local file: %v", err)
+	}
+
+	var buf bytes.Buffer
+	err := svc.Upload(context.Background(), localFile, "public:/", &buf)
+	if err == nil {
+		t.Fatal("expected client-side validation error for remote root path, got nil")
+	}
+	if !strings.Contains(err.Error(), "must end with the target file name") {
+		t.Fatalf("error should mention file name requirement, got: %s", err.Error())
+	}
+	if requestHit {
+		t.Fatal("no request should be made when remote path is root")
 	}
 }

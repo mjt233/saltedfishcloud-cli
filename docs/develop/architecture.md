@@ -57,7 +57,7 @@ github.com/schollz/progressbar # 终端进度条
 | 入口层 | `main.go` | 初始化 cobra 根命令，调用 `Execute()` | → cmd |
 | 命令层 | `cmd/` | 解析参数、校验输入、调用 service 层、格式化输出；参数个数错误时先输出当前命令帮助文本再返回错误 | → internal |
 | 服务层 | `internal/service/` | 实现业务编排：路径解析、uid 映射、递归上传/下载、跨资源域复制 | → client, localfs |
-| 客户端层 | `internal/client/` | 封装 HTTP 请求，统一注入 `Authorization: ApiTicket`，处理响应体解包 | 无外部依赖 |
+| 客户端层 | `internal/client/` | 封装 HTTP 请求，统一注入 `Authorization: Bearer`，处理响应体解包 | 无外部依赖 |
 | 配置层 | `internal/config/` | 读取并合并 `--api-ticket` / `SFC_API_TICKET` / `~/.config/sfc-cli/config.json`；缓存 `uid` | → client |
 | 文件系统层 | `internal/localfs/` | 本地目录遍历、路径规范化 | 无外部依赖 |
 
@@ -95,7 +95,7 @@ type APIClient struct {
 ```
 
 职责：
-- 所有请求自动注入 `Authorization: ApiTicket {ticket}`
+- 所有请求自动注入 `Authorization: Bearer {token}`（当前后端为 OIDC access token 鉴权）
 - 统一解析 JSON 响应，抽取 `data` 字段（除 `/api/hello/feature`）
 - 统一错误处理：解析 `businessCode` + `msg`，转换为 Go error
 - 下载接口返回原始 `*http.Response`，由上层写入文件
@@ -118,7 +118,7 @@ type ResolvedPath struct {
 
 | 操作 | 策略 |
 | --- | --- |
-| 目录上传 | 本地 `filepath.WalkDir` 遍历 → 逐层 `mkdir` → 逐文件 `upload` |
+| 目录上传 | 本地 `filepath.WalkDir` 遍历（符号链接/空文件跳过并警告）→ 逐层 `mkdir` → 逐文件流式 `upload`（单条目失败收集汇总，不中止整体；请求使用无全局超时客户端，超时由 `ctx` 控制） |
 | 目录下载 | 远程 `fileList` 递归 → 逐文件 `download` + 本地 `os.MkdirAll` |
 | 跨资源域 `cp`/`mv` | 直接调用 `copy`/`move` 接口的 `sourceUid` / `targetUid` |
 | `local → remote` 的 `cp`/`mv` | 退化为上传；`mv` 在上传成功后删除本地源文件 |

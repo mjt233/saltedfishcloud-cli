@@ -334,9 +334,9 @@ func (s *DiskFileService) Remove(ctx context.Context, rawPath string) error {
 		"path": {dirPath},
 	}
 
-	// 发送 DELETE 请求，body 包含文件名数组
-	names := []string{fileName}
-	if err := s.client.DeleteJSON(ctx, "/api/openApi/diskFile/delete/v1", q, names, nil); err != nil {
+	// 发送 DELETE 请求，body 为 FileNameList 对象（后端反序列化要求 {"fileName": [...]} 结构）
+	body := map[string][]string{"fileName": {fileName}}
+	if err := s.client.DeleteJSON(ctx, "/api/openApi/diskFile/delete/v1", q, body, nil); err != nil {
 		return fmt.Errorf("failed to delete %q: %w", rp.Path, err)
 	}
 	return nil
@@ -426,14 +426,24 @@ func (s *DiskFileService) Upload(ctx context.Context, localPath, remotePath stri
 
 // uploadSingleFile 将单个本地文件上传到远端路径。
 // rp.Path 的基础名用作上传文件名，父目录作为 path 查询参数。
-// 若文件大小可知，通过进度条展示上传进度。
+// 通过进度条展示上传进度；文件大小同时用于精确设置请求的 Content-Length。
 func (s *DiskFileService) uploadSingleFile(ctx context.Context, localPath string, rp ResolvedPath, out io.Writer) error {
+	// 单文件上传要求远端路径以目标文件名结尾，根路径无法推导文件名，直接给出明确错误
+	if rp.Path == "/" {
+		return fmt.Errorf("remote path %q must end with the target file name for single-file upload", rp.Path)
+	}
+
 	// 打开本地文件
 	f, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to open file %q: %w", localPath, err)
 	}
 	defer f.Close()
+
+	// 防御：打开的对象实际是目录（如符号链接指向目录）时给出明确错误，避免读入时才暴露晦涩的 IO 错误
+	if fi, statErr := f.Stat(); statErr == nil && fi.IsDir() {
+		return fmt.Errorf("cannot upload %q: it is a directory, not a regular file", localPath)
+	}
 
 	// 从远端路径中提取文件名和父目录
 	fileName := path.Base(rp.Path)
@@ -459,9 +469,9 @@ func (s *DiskFileService) uploadSingleFile(ctx context.Context, localPath string
 		"path": {dirPath},
 	}
 
-	// 上传文件，同步更新进度条
+	// 上传文件，同步更新进度条；fileSize 透传给客户端用于流式上传与 Content-Length 计算
 	reader := io.TeeReader(f, bar)
-	if err := s.client.UploadFile(ctx, "/api/openApi/diskFile/upload/v1", q, "file", fileName, reader, nil); err != nil {
+	if err := s.client.UploadFile(ctx, "/api/openApi/diskFile/upload/v1", q, "file", fileName, reader, fileSize, nil); err != nil {
 		return fmt.Errorf("failed to upload file %q: %w", localPath, err)
 	}
 	_ = bar.Finish()
@@ -485,12 +495,26 @@ func (s *DiskFileService) mkdir(ctx context.Context, rp ResolvedPath) error {
 // uploadDir 递归将本地目录上传到远端目录。
 // 使用 localfs.Walk 遍历本地目录，按条目顺序（目录先于内容）先创建远端子目录，
 // 再上传各个文件，确保父目录在上传子文件前已存在。
+//
+// 失败策略：目录内的符号链接与空文件跳过并警告（后端会拒绝空文件，重试必然失败）；
+// 其余单条目失败不中止整体，记录后继续上传剩余条目，结束时向 out 输出汇总，
+// 存在失败时返回聚合错误（含全部失败明细），供调用方以非零码退出。
 func (s *DiskFileService) uploadDir(ctx context.Context, localPath string, rp ResolvedPath, out io.Writer) error {
 	// 获取本地目录的所有条目（目录先于其内容出现）
 	entries, err := localfs.Walk(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to walk local directory %q: %w", localPath, err)
 	}
+
+	// 空目录：没有任何条目可上传，给出警告提示，远端不会产生任何变更
+	if len(entries) == 0 {
+		fmt.Fprintf(out, "warning: local directory \"%s\" is empty, nothing to upload\n", localPath)
+		return nil
+	}
+
+	// uploadFailures 收集各条目的失败明细；succeeded/skipped 用于结果汇总
+	var uploadFailures []error
+	succeeded, skipped := 0, 0
 
 	// 遍历条目，按顺序执行 mkdir（目录）或 upload（文件）
 	for _, entry := range entries {
@@ -502,17 +526,47 @@ func (s *DiskFileService) uploadDir(ctx context.Context, localPath string, rp Re
 			Path: path.Join(rp.Path, relRemote),
 		}
 
-		if entry.IsDir {
-			// 先创建远端子目录
-			if err := s.mkdir(ctx, entryRp); err != nil {
-				return err
-			}
-		} else {
-			// 上传文件到对应远端路径
-			if err := s.uploadSingleFile(ctx, entry.AbsolutePath, entryRp, out); err != nil {
-				return err
-			}
+		// 符号链接、目录联接等非普通条目：跳过并警告。链接目录在 Walk 中不标记为目录，
+		// 若按文件上传会在读取内容时失败；为避免中断整体上传，这里明确跳过
+		if entry.IsSpecial {
+			skipped++
+			fmt.Fprintf(out, "warning: skip symlink/junction \"%s\"\n", entry.RelativePath)
+			continue
 		}
+
+		if entry.IsDir {
+			// 先创建远端子目录；失败记录后继续，其下条目会在后续各自报错
+			if err := s.mkdir(ctx, entryRp); err != nil {
+				uploadFailures = append(uploadFailures, fmt.Errorf("mkdir %s: %w", relRemote, err))
+			}
+			continue
+		}
+
+		// 空文件：后端上传接口会拒绝 0 字节文件，直接跳过并警告，避免无意义的失败
+		if entry.Size == 0 {
+			skipped++
+			fmt.Fprintf(out, "warning: skip empty file \"%s\"\n", entry.RelativePath)
+			continue
+		}
+
+		// 上传文件到对应远端路径；失败记录后继续上传其余文件
+		if err := s.uploadSingleFile(ctx, entry.AbsolutePath, entryRp, out); err != nil {
+			uploadFailures = append(uploadFailures, fmt.Errorf("%s: %w", relRemote, err))
+			continue
+		}
+		succeeded++
+	}
+
+	// 输出汇总结果与失败明细，便于用户定位问题
+	fmt.Fprintf(out, "\nDirectory upload summary: %d succeeded, %d skipped, %d failed\n", succeeded, skipped, len(uploadFailures))
+	for _, fail := range uploadFailures {
+		fmt.Fprintf(out, "  failed: %v\n", fail)
+	}
+
+	// 存在失败时返回聚合错误（含全部明细），调用方（cobra）据此以非零码退出
+	if len(uploadFailures) > 0 {
+		return fmt.Errorf("directory upload of %q finished with %d failure(s): %w",
+			localPath, len(uploadFailures), errors.Join(uploadFailures...))
 	}
 	return nil
 }

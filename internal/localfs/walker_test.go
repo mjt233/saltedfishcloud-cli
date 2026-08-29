@@ -181,3 +181,49 @@ func TestWalk_Directory_DirsAppearBeforeContents(t *testing.T) {
 		t.Fatalf("expected sub (idx=%d) to appear before sub/file.txt (idx=%d)", subIdx, fileIdx)
 	}
 }
+
+// TestWalk_MarksSymlinksAndSizes 验证 Walk 为符号链接条目标记 IsSymlink，
+// 并为普通文件填充 Size（空文件为 0）。符号链接不可创建时跳过该部分断言。
+func TestWalk_MarksSymlinksAndSizes(t *testing.T) {
+	base := t.TempDir()
+
+	// a.txt 内容 7 字节；empty.bin 为 0 字节空文件
+	if err := os.WriteFile(filepath.Join(base, "a.txt"), []byte("1234567"), 0644); err != nil {
+		t.Fatalf("failed to create a.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "empty.bin"), nil, 0644); err != nil {
+		t.Fatalf("failed to create empty.bin: %v", err)
+	}
+
+	// link.txt 指向 a.txt；无符号链接权限的环境跳过该断言
+	haveSymlink := true
+	if err := os.Symlink(filepath.Join(base, "a.txt"), filepath.Join(base, "link.txt")); err != nil {
+		t.Logf("symlink unavailable, skipping symlink assertions: %v", err)
+		haveSymlink = false
+	}
+
+	entries, err := localfs.Walk(base)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	byRel := make(map[string]localfs.WalkEntry)
+	for _, e := range entries {
+		byRel[e.RelativePath] = e
+	}
+
+	// a.txt：普通文件，Size 为 7
+	if e, ok := byRel["a.txt"]; !ok || e.IsSpecial || e.Size != 7 {
+		t.Fatalf("unexpected entry for a.txt: %+v, ok=%v", byRel["a.txt"], ok)
+	}
+	// empty.bin：普通文件，Size 为 0
+	if e, ok := byRel["empty.bin"]; !ok || e.IsSpecial || e.Size != 0 {
+		t.Fatalf("unexpected entry for empty.bin: %+v, ok=%v", byRel["empty.bin"], ok)
+	}
+	// link.txt：标记为特殊条目（符号链接）
+	if haveSymlink {
+		if e, ok := byRel["link.txt"]; !ok || !e.IsSpecial {
+			t.Fatalf("expected link.txt to be marked as special: %+v, ok=%v", byRel["link.txt"], ok)
+		}
+	}
+}

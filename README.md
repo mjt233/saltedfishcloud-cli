@@ -84,7 +84,7 @@ sfc-cli
 
 - `ls [path]` - 列出指定目录下的文件列表，未指定时默认使用 `/`
 - `get <remoteResourcePath> [localPath]` - 把远程网盘资源下载到本地（支持文件夹/单文件）。`localPath`未指定时，文件下载到当前工作目录。
-- `upload <localPath> <remoteResourcePath>` - 把本地文件/文件夹上传到远程。`remoteResourcePath`只能接受远程资源域。
+- `upload <localPath> <remoteResourcePath>` - 把本地文件/文件夹上传到远程。`remoteResourcePath`只能接受远程资源域；单文件上传时`remoteResourcePath`需以目标文件名结尾。文件夹上传采用流式传输：目录内的符号链接和空文件会被跳过并输出警告；单个文件失败不中止整体上传，结束时输出汇总，存在失败时以非零码退出。
 - `cp <sourceResourcePath> <targetResourcePath>` - 复制文件，支持跨资源域操作。当`sourceResourcePath`的资源域为`local`时，`targetResourcePath`为`public`或`private`时，则等价于`upload`操作。
 - `mv <sourceResourcePath> <targetResourcePath>` - 移动文件，支持跨资源域操作，参数逻辑同`copy`。
 - `rm <targetResourcePath>` - 删除文件

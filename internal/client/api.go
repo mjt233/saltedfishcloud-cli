@@ -5,6 +5,8 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -66,9 +68,11 @@ type apiEnvelope struct {
 }
 
 // addAuthHeader 在请求上注入鉴权头（若 apiTicket 非空）。
+// 当前咸鱼云后端的开放接口通过 OIDC access token 鉴权，
+// 使用标准的 `Authorization: Bearer {token}` 方案（`ApiTicket` 方案已不被后端接受）。
 func (c *APIClient) addAuthHeader(req *http.Request) {
 	if c.apiTicket != "" {
-		req.Header.Set("Authorization", "ApiTicket "+c.apiTicket)
+		req.Header.Set("Authorization", "Bearer "+c.apiTicket)
 	}
 }
 
@@ -94,11 +98,17 @@ func checkHTTPStatus(resp *http.Response) error {
 // 最后检查 code 是否为 200。businessCode 非零时返回业务错误；
 // code != 200 且 businessCode 为 0 时返回通用错误。
 func (c *APIClient) doJSONRequest(req *http.Request, out any) error {
+	return c.doRequestWithClient(c.httpClient, req, out)
+}
+
+// doRequestWithClient 使用指定底层 http.Client 执行请求并解包标准信封响应到 out。
+// 是 doJSONRequest 的核心实现，允许上传等场景替换为无全局超时的客户端。
+func (c *APIClient) doRequestWithClient(httpClient *http.Client, req *http.Request, out any) error {
 	// 注入鉴权头
 	c.addAuthHeader(req)
 
 	// 发起请求
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("http request failed: %w [%s]", err, req.URL)
 	}
@@ -218,35 +228,112 @@ func (c *APIClient) DeleteJSON(ctx context.Context, path string, query url.Value
 	return c.doJSONRequest(req, out)
 }
 
-// UploadFile 以 multipart/form-data 格式向指定路径上传文件，
+// UploadFile 以 multipart/form-data 流式向指定路径上传文件，
 // 并将响应信封中的 data 字段解包到 out。
-// fileField 为表单字段名，fileName 为文件名，reader 为文件内容来源。
-func (c *APIClient) UploadFile(ctx context.Context, path string, query url.Values, fileField, fileName string, reader io.Reader, out any) error {
-	// 构造 multipart 请求体
-	// 当前实现会把 multipart body 缓存在内存中，后续可改为流式写入优化大文件上传。
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-
-	// 创建文件字段并写入文件内容
-	fw, err := mw.CreateFormFile(fileField, fileName)
+// fileField 为表单字段名，fileName 为文件名，reader 为文件内容来源，
+// fileSize 为内容已知大小（字节），未知时传 -1 并回退为 chunked 传输。
+// 内容边读边发，不会整体缓冲在内存；请求使用无全局超时的客户端，
+// 大文件上传的总时长不受 NewAPIClient 默认超时限制，超时控制由 ctx 负责。
+func (c *APIClient) UploadFile(ctx context.Context, path string, query url.Values, fileField, fileName string, reader io.Reader, fileSize int64, out any) error {
+	// 生成随机 boundary，并用同一 boundary 预先测量 multipart 固定部分（part 头 + 结束边界）的长度
+	boundary, err := randomBoundary()
 	if err != nil {
-		return fmt.Errorf("failed to create form file: %w", err)
+		return fmt.Errorf("failed to generate multipart boundary: %w", err)
 	}
-	if _, err := io.Copy(fw, reader); err != nil {
-		return fmt.Errorf("failed to write file content: %w", err)
-	}
-
-	// 关闭 writer 以写入边界结束标记
-	if err := mw.Close(); err != nil {
-		return fmt.Errorf("failed to close multipart writer: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.buildURL(path, query), &buf)
+	fixedLen, err := measureMultipartFixedPart(boundary, fileField, fileName)
 	if err != nil {
+		return fmt.Errorf("failed to prepare multipart body: %w", err)
+	}
+
+	// 通过管道边读边发：后台 goroutine 把 reader 内容经 multipart writer 写入管道，请求体从管道读出
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+	if err := mw.SetBoundary(boundary); err != nil {
+		return fmt.Errorf("failed to prepare multipart body: %w", err)
+	}
+
+	// copyDone 用于回收后台写入 goroutine 的结果，避免 goroutine 泄漏
+	copyDone := make(chan error, 1)
+	go func() {
+		copyDone <- writeMultipartFile(mw, pw, fileField, fileName, reader)
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.buildURL(path, query), pr)
+	if err != nil {
+		// 请求构造失败时关闭管道，让后台写入 goroutine 立即退出
+		pw.Close()
+		<-copyDone
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	return c.doJSONRequest(req, out)
+	// 大小已知时精确设置 Content-Length，避免 chunked 编码在部分服务器/代理上的兼容性问题
+	if fileSize >= 0 {
+		req.ContentLength = fixedLen + fileSize
+	}
+
+	// 上传使用无全局超时的克隆客户端：与 Download 同理，整个请求时长不可预估，超时交给 ctx
+	streamClient := *c.httpClient
+	streamClient.Timeout = 0
+	err = c.doRequestWithClient(&streamClient, req, out)
+
+	// 等待后台写入 goroutine 结束；请求层错误优先返回，其次才是本地读写错误
+	copyErr := <-copyDone
+	if err != nil {
+		return err
+	}
+	if copyErr != nil {
+		return copyErr
+	}
+	return nil
+}
+
+// writeMultipartFile 把 reader 的内容以指定字段写入 mw，并在结束后关闭 writer 与管道。
+// 任一环节失败时通过 pw.CloseWithError 让请求侧立即感知并终止传输。
+func writeMultipartFile(mw *multipart.Writer, pw *io.PipeWriter, fileField, fileName string, reader io.Reader) error {
+	// 创建文件字段
+	fw, err := mw.CreateFormFile(fileField, fileName)
+	if err != nil {
+		pw.CloseWithError(fmt.Errorf("failed to create form file: %w", err))
+		return err
+	}
+	// 把内容拷贝进 multipart part
+	if _, err := io.Copy(fw, reader); err != nil {
+		pw.CloseWithError(fmt.Errorf("failed to write file content: %w", err))
+		return err
+	}
+	// 写入结束边界
+	if err := mw.Close(); err != nil {
+		pw.CloseWithError(fmt.Errorf("failed to close multipart writer: %w", err))
+		return err
+	}
+	return pw.Close()
+}
+
+// measureMultipartFixedPart 用给定 boundary 构造与实际上传一致的 multipart part 头和结束边界，
+// 返回其字节长度，供流式上传时精确设置 Content-Length。
+// CreateFormFile 的输出是确定性的，测量结果与实际请求中的固定部分完全一致。
+func measureMultipartFixedPart(boundary, fileField, fileName string) (int64, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	if err := mw.SetBoundary(boundary); err != nil {
+		return 0, err
+	}
+	if _, err := mw.CreateFormFile(fileField, fileName); err != nil {
+		return 0, err
+	}
+	if err := mw.Close(); err != nil {
+		return 0, err
+	}
+	return int64(buf.Len()), nil
+}
+
+// randomBoundary 生成 60 个十六进制字符的随机 boundary，避免与文件内容冲突。
+func randomBoundary() (string, error) {
+	var buf [30]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf[:]), nil
 }
 
 // Download 向指定路径发送 GET 请求并直接返回原始 HTTP 响应，供调用方处理二进制流。

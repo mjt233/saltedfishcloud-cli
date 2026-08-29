@@ -13,13 +13,14 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
-// TestDoJSON_AddsApiTicketHeaderAndUnwrapsData 验证 GetJSON 正确注入鉴权头并从 data 字段解包响应。
+// TestDoJSON_AddsApiTicketHeaderAndUnwrapsData 验证 GetJSON 正确注入 Bearer 鉴权头并从 data 字段解包响应。
 func TestDoJSON_AddsApiTicketHeaderAndUnwrapsData(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "ApiTicket ticket-1" {
+		if got := r.Header.Get("Authorization"); got != "Bearer ticket-1" {
 			t.Fatalf("unexpected auth header: %s", got)
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -368,12 +369,144 @@ func TestUploadFile_SendsMultipartFormData(t *testing.T) {
 	var out struct {
 		Uploaded bool `json:"uploaded"`
 	}
-	if err := cli.UploadFile(context.Background(), "/api/openApi/upload", nil, "file", "hello.txt", bytes.NewBufferString("hello"), &out); err != nil {
+	// fileSize 传 5，客户端应精确设置 Content-Length 并完整发送内容
+	if err := cli.UploadFile(context.Background(), "/api/openApi/upload", nil, "file", "hello.txt", bytes.NewBufferString("hello"), 5, &out); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !out.Uploaded {
 		t.Fatalf("expected Uploaded=true, got %v", out)
 	}
+}
+
+// TestUploadFile_SetsExactContentLength 验证流式上传时 Content-Length 为
+// multipart 固定部分（part 头 + 结束边界）与文件大小之和，且内容完整到达。
+func TestUploadFile_SetsExactContentLength(t *testing.T) {
+	// 构造 5MB 内容，验证不会整体缓冲且长度计算正确
+	content := bytes.Repeat([]byte("0123456789abcdef"), 320*1024) // 5MB
+	var gotContentLength int64
+	var gotContentType string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotContentLength = r.ContentLength
+		gotContentType = r.Header.Get("Content-Type")
+
+		mediaType, params, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err != nil || mediaType != "multipart/form-data" {
+			t.Fatalf("unexpected content type: %s", r.Header.Get("Content-Type"))
+		}
+		mr := multipart.NewReader(r.Body, params["boundary"])
+		part, err := mr.NextPart()
+		if err != nil {
+			t.Fatalf("failed to read multipart part: %v", err)
+		}
+		data, err := io.ReadAll(part)
+		if err != nil {
+			t.Fatalf("failed to read part content: %v", err)
+		}
+		if !bytes.Equal(data, content) {
+			t.Fatalf("content mismatch: got %d bytes, want %d bytes", len(data), len(content))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": nil, "msg": "OK"})
+	}))
+	defer srv.Close()
+
+	cli := NewAPIClient(srv.URL, "t")
+	var out any
+	if err := cli.UploadFile(context.Background(), "/api/openApi/upload", nil, "file", "big.bin", bytes.NewReader(content), int64(len(content)), &out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 用请求携带的 boundary 独立计算期望的 Content-Length：固定部分 + 文件大小
+	_, params, err := mime.ParseMediaType(gotContentType)
+	if err != nil || params["boundary"] == "" {
+		t.Fatalf("unexpected content type: %s", gotContentType)
+	}
+	var fixed bytes.Buffer
+	mw := multipart.NewWriter(&fixed)
+	if err := mw.SetBoundary(params["boundary"]); err != nil {
+		t.Fatalf("failed to set boundary: %v", err)
+	}
+	if _, err := mw.CreateFormFile("file", "big.bin"); err != nil {
+		t.Fatalf("failed to create form file: %v", err)
+	}
+	_ = mw.Close()
+	expected := int64(fixed.Len()) + int64(len(content))
+	if gotContentLength != expected {
+		t.Fatalf("expected Content-Length=%d, got %d", expected, gotContentLength)
+	}
+}
+
+// TestUploadFile_UsesZeroTimeout 验证 UploadFile 使用 Timeout=0 的克隆客户端，
+// 长时间上传不受全局 HTTP 客户端超时限制（与 Download 的处理一致）。
+func TestUploadFile_UsesZeroTimeout(t *testing.T) {
+	const bodyDelay = 100 * time.Millisecond
+
+	// 测试服务器：完整读取请求体后延迟 100ms 才响应，整个请求周期超过全局超时
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		time.Sleep(bodyDelay)
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": nil, "msg": "OK"})
+	}))
+	defer srv.Close()
+
+	// 全局客户端超时（5ms）远短于请求周期；若 UploadFile 直接使用该客户端必然超时失败
+	cli := &APIClient{
+		baseURL:    srv.URL,
+		apiTicket:  "t",
+		httpClient: &http.Client{Timeout: 5 * time.Millisecond},
+	}
+	var out any
+	if err := cli.UploadFile(context.Background(), "/api/openApi/upload", nil, "file", "slow.bin", bytes.NewReader(bytes.Repeat([]byte("x"), 1024)), 1024, &out); err != nil {
+		t.Fatalf("UploadFile should not fail despite short httpClient.Timeout, got: %v", err)
+	}
+}
+
+// TestUploadFile_ReaderErrorPropagates 验证内容读取失败时 UploadFile 返回错误而不是静默截断。
+func TestUploadFile_ReaderErrorPropagates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 200, "data": nil, "msg": "OK"})
+	}))
+	defer srv.Close()
+
+	// 声明大小为 1024 但读到一半就失败，模拟本地文件读取错误
+	cli := NewAPIClient(srv.URL, "t")
+	badReader := io.MultiReader(bytes.NewReader(bytes.Repeat([]byte("x"), 512)), iotest.ErrReader(io.ErrUnexpectedEOF))
+	var out any
+	if err := cli.UploadFile(context.Background(), "/api/openApi/upload", nil, "file", "bad.bin", badReader, 1024, &out); err == nil {
+		t.Fatal("expected error when reader fails mid-stream, got nil")
+	}
+}
+
+// TestUploadFile_ContextCancelTerminates 验证 ctx 取消时请求中止且后台写入 goroutine 正常退出（无死锁）。
+func TestUploadFile_ContextCancelTerminates(t *testing.T) {
+	// 测试服务器：逐块慢速读取请求体，保证取消发生时传输仍在进行；
+	// 设置读超时兜底，确保无论客户端断开行为如何，处理器都能及时退出
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if rc := http.NewResponseController(w); rc != nil {
+			_ = rc.SetReadDeadline(time.Now().Add(2 * time.Second))
+		}
+		buf := make([]byte, 512)
+		for {
+			if _, err := r.Body.Read(buf); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	cli := NewAPIClient(srv.URL, "t")
+	// 内容足够大，确保 50ms 内传不完
+	reader := bytes.NewReader(bytes.Repeat([]byte("y"), 4<<20))
+	var out any
+	err := cli.UploadFile(ctx, "/api/openApi/upload", nil, "file", "cancel.bin", reader, 4<<20, &out)
+	if err == nil {
+		t.Fatal("expected error after context cancel, got nil")
+	}
+	// UploadFile 已等待后台 goroutine 退出（函数返回即无死锁）；竞态由 -race 检测覆盖
 }
 
 // TestDownload_UsesZeroTimeout 验证 Download 使用 Timeout=0 的克隆客户端，

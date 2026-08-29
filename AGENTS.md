@@ -37,7 +37,7 @@
 
 ## 接口与数据约定
 
-- 远端业务接口统一使用 `Authorization: ApiTicket {ticket}`。
+- 远端业务接口统一使用 `Authorization: Bearer {token}`（当前后端为 OIDC access token 鉴权，旧的 `ApiTicket` 方案已不被接受）。
 - 除 `/api/hello/feature` 外，JSON 接口默认从响应体的 `data` 字段读取业务数据。
 - `/api/openApi/diskFile/download/v1` 返回二进制流，不按 JSON 解析。
 - 业务错误需要尽量保留后端返回的 `businessCode` 与 `msg` 语义，输出对用户可读的错误信息。
