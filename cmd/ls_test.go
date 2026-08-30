@@ -15,9 +15,7 @@ import (
 // TestLSCommand_OutputsTableHeaderAndRow 验证 ls 命令在标准输出写出正确的表头和数据行。
 func TestLSCommand_OutputsTableHeaderAndRow(t *testing.T) {
 	// 重置包级标志变量，防止其他测试的残留值干扰
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	// 启动测试服务器，模拟文件列表接口
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +36,6 @@ func TestLSCommand_OutputsTableHeaderAndRow(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"ls", "public:/demo",
 	})
 
@@ -67,9 +64,7 @@ func TestLSCommand_OutputsTableHeaderAndRow(t *testing.T) {
 
 // TestLSCommand_DefaultsToRootPath 验证 ls 命令在不传路径参数时默认请求根目录 /。
 func TestLSCommand_DefaultsToRootPath(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	// 记录文件列表接口收到的 path 查询参数
 	requestedPath := ""
@@ -97,7 +92,7 @@ func TestLSCommand_DefaultsToRootPath(t *testing.T) {
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{"--service-url", srv.URL, "--api-ticket", "test-ticket", "ls"})
+	root.SetArgs([]string{"--service-url", srv.URL, "ls"})
 
 	if err := root.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -109,9 +104,7 @@ func TestLSCommand_DefaultsToRootPath(t *testing.T) {
 
 // TestLSCommand_RespectsContextCancellation 验证 ls 命令会透传执行上下文。
 func TestLSCommand_RespectsContextCancellation(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("request should not be sent when command context is canceled")
@@ -127,7 +120,6 @@ func TestLSCommand_RespectsContextCancellation(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"ls", "public:/demo",
 	})
 

@@ -17,8 +17,8 @@ import (
 	"time"
 )
 
-// TestDoJSON_AddsApiTicketHeaderAndUnwrapsData 验证 GetJSON 正确注入 Bearer 鉴权头并从 data 字段解包响应。
-func TestDoJSON_AddsApiTicketHeaderAndUnwrapsData(t *testing.T) {
+// TestDoJSON_AddsBearerHeaderAndUnwrapsData 验证 GetJSON 正确注入 Bearer 鉴权头并从 data 字段解包响应。
+func TestDoJSON_AddsBearerHeaderAndUnwrapsData(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer ticket-1" {
 			t.Fatalf("unexpected auth header: %s", got)
@@ -322,9 +322,9 @@ func TestDeleteJSON_NilBodySendsNoBody(t *testing.T) {
 	})
 
 	cli := &APIClient{
-		baseURL:    "http://example.com",
-		apiTicket:  "t",
-		httpClient: &http.Client{Transport: transport},
+		baseURL:     "http://example.com",
+		tokenSource: staticTokenSource{token: "t"},
+		httpClient:  &http.Client{Transport: transport},
 	}
 	var out any
 	if err := cli.DeleteJSON(context.Background(), "/api/openApi/rm", nil, nil, &out); err != nil {
@@ -451,9 +451,9 @@ func TestUploadFile_UsesZeroTimeout(t *testing.T) {
 
 	// 全局客户端超时（5ms）远短于请求周期；若 UploadFile 直接使用该客户端必然超时失败
 	cli := &APIClient{
-		baseURL:    srv.URL,
-		apiTicket:  "t",
-		httpClient: &http.Client{Timeout: 5 * time.Millisecond},
+		baseURL:     srv.URL,
+		tokenSource: staticTokenSource{token: "t"},
+		httpClient:  &http.Client{Timeout: 5 * time.Millisecond},
 	}
 	var out any
 	if err := cli.UploadFile(context.Background(), "/api/openApi/upload", nil, "file", "slow.bin", bytes.NewReader(bytes.Repeat([]byte("x"), 1024)), 1024, &out); err != nil {
@@ -528,9 +528,9 @@ func TestDownload_UsesZeroTimeout(t *testing.T) {
 	// 全局客户端超时（5ms）远短于 body 延迟（100ms）；
 	// 若 Download 直接使用该客户端，body 读取将超时失败。
 	cli := &APIClient{
-		baseURL:    srv.URL,
-		apiTicket:  "t",
-		httpClient: &http.Client{Timeout: 5 * time.Millisecond},
+		baseURL:     srv.URL,
+		tokenSource: staticTokenSource{token: "t"},
+		httpClient:  &http.Client{Timeout: 5 * time.Millisecond},
 	}
 
 	// Download 应使用 Timeout=0 的克隆客户端，body 读取不受 5ms 限制

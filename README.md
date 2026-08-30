@@ -16,7 +16,7 @@
 2. 编辑 `.env` 文件，填入实际的配置值：
    ```bash
    SFC_SERVICE_URL=http://saltedfishcloud-server-host
-   SFC_API_TICKET=your_actual_api_ticket
+   SFC_CLIENT_ID=your_oauth_client_id
    ```
 
 3. 程序启动时会自动从当前工作目录加载 `.env` 文件中的环境变量
@@ -38,19 +38,29 @@
 
 ### 2. 账号认证
 
-#### 手动配置永久有效的 ApiTicket
+通过 OIDC 设备授权流程（RFC 8628）登录，无需手动配置令牌：
 
-- 方式1：使用命令行参数 `--api-ticket=<apiTicket>` 手动指定
-- 方式2：配置环境变量 `SFC_API_TICKET`
-- 方式3：手动修改配置文件 `~/.config/sfc-cli/config.json`（如果没有可手动创建）
-  配置文件中的键名保持为 `apiTicket`：
-  ```json
-  {
-    "apiTicket": "your permanent api ticket"
-  }
-  ```
+```bash
+sfc-cli login --client-id=<你的应用client_id>
+```
 
-当缺少 `service-url` 或 `api-ticket` 时，CLI 会直接提示以上三种配置方式，帮助定位缺失项。
+流程说明：
+
+1. CLI 从 `{serviceUrl}/.well-known/openid-configuration` 自动发现授权端点
+2. 申请设备码后，终端展示验证页面地址与用户码，请自行在浏览器打开该地址
+3. 在浏览器登录网盘并确认授权后，CLI 自动获得令牌并写入配置文件
+4. 登录成功后打印当前登录用户；`access_token` 过期时 CLI 使用 `refresh_token` 自动刷新并回写配置文件
+
+前置条件：需管理员在网盘管理后台创建第三方 OAuth 应用，并将令牌端点认证方式设为 `none`（public client），把应用 ID 作为 `--client-id` 传入。
+
+可用参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| `--client-id` | OAuth 应用 ID；也可通过环境变量 `SFC_CLIENT_ID` 或配置文件键 `clientId` 提供 |
+| `--scope` | 授权范围，空格分隔；默认 `profile storage_read storage_write` |
+
+当缺少 `service-url` 或尚未登录时，CLI 会提示先执行 `sfc-cli login`。
 
 
 ### 3. 命令与参数
@@ -58,7 +68,6 @@
 命令格式参考：
 ```
 sfc-cli
-  [--api-ticket=<apiTicket>]
   [--service-url=<serviceUrl>]
   <command> [<args>]
 ```
@@ -90,7 +99,23 @@ sfc-cli
 - `rm <targetResourcePath>` - 删除文件
 - `rename <sourceResourcePath> <newName>` - 重命名文件，不能修改文件位置。
 
+##### 账号操作
+
+- `login` - 通过 OIDC 设备授权流程登录网盘，将令牌持久化到配置文件。参数见「账号认证」章节
+
 ##### 其他操作
 
 - `version` - 查看当前cli程序版本
 - `remote-version` - 查询远端服务端版本号
+
+## 配置文件参考
+
+`~/.config/sfc-cli/config.json` 的完整键名：
+
+| 键名 | 说明 |
+| --- | --- |
+| `serviceUrl` | 服务基础地址（必填） |
+| `clientId` | OAuth 登录所用应用的 client_id |
+| `accessToken` | OAuth 登录获得的访问令牌（由 `login` 写入） |
+| `refreshToken` | OAuth 登录获得的刷新令牌（由 `login` 写入） |
+| `expiresAt` | 访问令牌过期时间，RFC3339 格式（由 `login` 写入） |

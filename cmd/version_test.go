@@ -32,9 +32,7 @@ func TestVersionCommand_PrintsInjectedVersion(t *testing.T) {
 // TestRemoteVersionCommand_PrintsServerVersion 验证 remoteVersion 命令输出服务端版本号。
 func TestRemoteVersionCommand_PrintsServerVersion(t *testing.T) {
 	// 重置包级标志变量
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	// 启动测试服务器，模拟 /api/hello/feature 接口
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +45,7 @@ func TestRemoteVersionCommand_PrintsServerVersion(t *testing.T) {
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
 	root.SetErr(buf)
-	root.SetArgs([]string{"--service-url", srv.URL, "--api-ticket", "dummy", "remote-version"})
+	root.SetArgs([]string{"--service-url", srv.URL, "remote-version"})
 
 	if err := root.Execute(); err != nil {
 		t.Fatalf("Execute returned error: %v", err)
@@ -60,9 +58,7 @@ func TestRemoteVersionCommand_PrintsServerVersion(t *testing.T) {
 // TestRemoteVersionCommand_MissingArgsReturnsError 验证 remoteVersion 命令不接受额外参数。
 func TestRemoteVersionCommand_MissingArgsReturnsError(t *testing.T) {
 	// 重置包级标志变量
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	root := NewRootCommand()
 	buf := new(bytes.Buffer)

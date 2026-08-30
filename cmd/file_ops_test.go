@@ -14,9 +14,7 @@ import (
 
 // TestRmCommand_ExecutesDelete 验证 rm 命令向后端发送删除请求。
 func TestRmCommand_ExecutesDelete(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	deleteCalled := false
 	var gotPath, gotUID string
@@ -45,7 +43,6 @@ func TestRmCommand_ExecutesDelete(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"rm", "public:/dir/file.txt",
 	})
 
@@ -69,9 +66,7 @@ func TestRmCommand_ExecutesDelete(t *testing.T) {
 
 // TestRmCommand_MissingArgsReturnsError 验证 rm 命令在缺少参数时返回错误。
 func TestRmCommand_MissingArgsReturnsError(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	root := NewRootCommand()
 	var buf bytes.Buffer
@@ -79,7 +74,6 @@ func TestRmCommand_MissingArgsReturnsError(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", "http://localhost:9999",
-		"--api-ticket", "test-ticket",
 		"rm",
 	})
 
@@ -90,9 +84,7 @@ func TestRmCommand_MissingArgsReturnsError(t *testing.T) {
 
 // TestRenameCommand_ExecutesRename 验证 rename 命令向后端发送重命名请求。
 func TestRenameCommand_ExecutesRename(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	renameCalled := false
 	var gotBody map[string]string
@@ -120,7 +112,6 @@ func TestRenameCommand_ExecutesRename(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"rename", "public:/docs/old.txt", "new.txt",
 	})
 
@@ -143,9 +134,7 @@ func TestRenameCommand_ExecutesRename(t *testing.T) {
 
 // TestRenameCommand_MissingArgsReturnsError 验证 rename 命令在缺少参数时返回错误。
 func TestRenameCommand_MissingArgsReturnsError(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	root := NewRootCommand()
 	var buf bytes.Buffer
@@ -153,7 +142,6 @@ func TestRenameCommand_MissingArgsReturnsError(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", "http://localhost:9999",
-		"--api-ticket", "test-ticket",
 		"rename", "public:/file.txt", // 缺少 newName
 	})
 
@@ -164,9 +152,7 @@ func TestRenameCommand_MissingArgsReturnsError(t *testing.T) {
 
 // TestCpCommand_ExecutesCopy 验证 cp 命令向后端发送复制请求。
 func TestCpCommand_ExecutesCopy(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	copyCalled := false
 	var gotBody map[string]any
@@ -203,7 +189,6 @@ func TestCpCommand_ExecutesCopy(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"cp", "public:/src/file.txt", "public:/dest/",
 	})
 
@@ -224,9 +209,7 @@ func TestCpCommand_ExecutesCopy(t *testing.T) {
 
 // TestCpCommand_MissingArgsReturnsError 验证 cp 命令在缺少参数时返回错误。
 func TestCpCommand_MissingArgsReturnsError(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	root := NewRootCommand()
 	var buf bytes.Buffer
@@ -234,7 +217,6 @@ func TestCpCommand_MissingArgsReturnsError(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", "http://localhost:9999",
-		"--api-ticket", "test-ticket",
 		"cp", "public:/src/file.txt", // 缺少 targetPath
 	})
 
@@ -245,9 +227,7 @@ func TestCpCommand_MissingArgsReturnsError(t *testing.T) {
 
 // TestMvCommand_ExecutesMove 验证 mv 命令向后端发送移动请求。
 func TestMvCommand_ExecutesMove(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	moveCalled := false
 	var gotBody map[string]any
@@ -284,7 +264,6 @@ func TestMvCommand_ExecutesMove(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"mv", "public:/src/file.txt", "public:/dest/",
 	})
 
@@ -305,9 +284,7 @@ func TestMvCommand_ExecutesMove(t *testing.T) {
 
 // TestMvCommand_MissingArgsReturnsError 验证 mv 命令在缺少参数时返回错误。
 func TestMvCommand_MissingArgsReturnsError(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	root := NewRootCommand()
 	var buf bytes.Buffer
@@ -315,7 +292,6 @@ func TestMvCommand_MissingArgsReturnsError(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", "http://localhost:9999",
-		"--api-ticket", "test-ticket",
 		"mv", "public:/src/file.txt", // 缺少 targetPath
 	})
 
@@ -327,9 +303,7 @@ func TestMvCommand_MissingArgsReturnsError(t *testing.T) {
 // TestMvCommand_LocalToRemote_RemovesLocalSource 验证 mv 命令从 local 移动到 remote 时，
 // 上传成功后会删除本地源文件。
 func TestMvCommand_LocalToRemote_RemovesLocalSource(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	uploadCalled := false
 
@@ -362,7 +336,6 @@ func TestMvCommand_LocalToRemote_RemovesLocalSource(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"mv", "local:" + localFile, "public:/dest/",
 	})
 
@@ -383,9 +356,7 @@ func TestMvCommand_LocalToRemote_RemovesLocalSource(t *testing.T) {
 // TestMvCommand_RemoteToLocal_RemovesRemoteSource 验证 mv 命令从 remote 移动到 local 时，
 // 下载成功后会删除远端源文件。
 func TestMvCommand_RemoteToLocal_RemovesRemoteSource(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	deleteCalled := false
 
@@ -426,7 +397,6 @@ func TestMvCommand_RemoteToLocal_RemovesRemoteSource(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"mv", "public:/remote.txt", "local:" + localTarget,
 	})
 

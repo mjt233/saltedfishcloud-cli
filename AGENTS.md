@@ -19,7 +19,8 @@
 
 ## 实现边界
 
-- CLI 当前只依赖用户手动提供的永久有效 `ApiTicket`，不实现 OAuth 授权码流程、换票或刷新逻辑。
+- 认证仅支持 OIDC 设备授权流程（`sfc-cli login`，public client，基于端点自动发现）。不实现手动 `apiTicket`、授权码流程、`logout`/`revoke` 命令。
+- `login` 负责设备授权引导、令牌持久化与 `refresh_token` 自动刷新；不实现授权码流程、`logout`/`revoke` 命令。
 - 资源路径格式固定为 `[resourceArea:]<path>`，支持 `local`、`private`、`public` 三种资源域。
 - 未显式声明资源域时，按 `private` 处理。
 - `private` 资源域的 `uid` 需要通过用户资料接口获取；`public` 固定为 `0`；`local` 不走远端接口。
@@ -31,13 +32,14 @@
 - `cmd/` 只做参数解析、输入校验、调用 service、格式化输出，不直接承载复杂业务逻辑。
 - `internal/service/` 负责路径解析、远程与本地操作编排、递归处理和跨资源域复制移动。
 - `internal/client/` 负责 HTTP 请求封装、认证头注入、响应解包和统一错误处理。
-- `internal/config/` 负责命令行参数、环境变量、配置文件合并，以及运行期 `uid` 缓存。
+- `internal/oauth/` 负责 OIDC 端点发现、设备授权流程、刷新令牌和可自动刷新的令牌源。
+- `internal/config/` 负责命令行参数、环境变量、配置文件合并，以及运行期 `uid` 缓存与 OAuth 登录态持久化。
 - `internal/localfs/` 负责本地文件系统遍历与路径规范化。
 - 新增代码优先落在上述分层中，不要把业务逻辑散落到命令层。
 
 ## 接口与数据约定
 
-- 远端业务接口统一使用 `Authorization: Bearer {token}`（当前后端为 OIDC access token 鉴权，旧的 `ApiTicket` 方案已不被接受）。
+- 远端业务接口统一使用 `Authorization: Bearer {token}`（OIDC access token 鉴权）。
 - 除 `/api/hello/feature` 外，JSON 接口默认从响应体的 `data` 字段读取业务数据。
 - `/api/openApi/diskFile/download/v1` 返回二进制流，不按 JSON 解析。
 - 业务错误需要尽量保留后端返回的 `businessCode` 与 `msg` 语义，输出对用户可读的错误信息。
@@ -46,7 +48,7 @@
 ## 命令优先级
 
 - P0：`ls`、`get`、`upload`、`rm`、`rename`
-- P1：`cp`、`mv`、`version`
+- P1：`cp`、`mv`、`version`、`login`
 - P2：`remote-version`
 
 如用户要求从零开始搭建或补全实现，默认优先保证 P0 链路完整，再处理 P1/P2。
@@ -61,7 +63,8 @@
 ## 配置约定
 
 - 配置优先级固定为：命令行参数 > 环境变量 > `~/.config/sfc-cli/config.json`。
-- 关键配置项为 `serviceUrl` 与 `apiTicket`。
+- 关键配置项为 `serviceUrl` 与 `clientId`/`accessToken`/`refreshToken`/`expiresAt`（OAuth 登录态）。
+- 业务命令要求已通过 `sfc-cli login` 获得 `accessToken`。
 - 缺失必要配置时，应尽早失败，并一次性指出缺少的项。
 
 ## 文档与变更同步

@@ -16,9 +16,7 @@ import (
 // TestGetCommand_DownloadsFile_ContentMatchesExpected 验证 get 命令从远端下载单个文件到本地，内容与远端相符。
 func TestGetCommand_DownloadsFile_ContentMatchesExpected(t *testing.T) {
 	// 重置包级标志变量，避免其他测试的残留值干扰
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	// 启动测试服务器：fileList 返回父目录条目（路径是文件），download 返回文件内容
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +48,6 @@ func TestGetCommand_DownloadsFile_ContentMatchesExpected(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"get", "public:/file.txt", target,
 	})
 
@@ -71,9 +68,7 @@ func TestGetCommand_DownloadsFile_ContentMatchesExpected(t *testing.T) {
 
 // TestGetCommand_DownloadsDirectory_CreatesNestedFiles 验证 get 命令递归下载目录并在本地重建目录树。
 func TestGetCommand_DownloadsDirectory_CreatesNestedFiles(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	// 启动测试服务器：/ 有 dir 目录，/dir 有一个文件和一个子目录
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +127,6 @@ func TestGetCommand_DownloadsDirectory_CreatesNestedFiles(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"get", "public:/dir", outputDir,
 	})
 
@@ -161,9 +155,7 @@ func TestGetCommand_DownloadsDirectory_CreatesNestedFiles(t *testing.T) {
 
 // TestGetCommand_MissingArgs_ReturnsError 验证 get 命令在缺少路径参数时返回错误。
 func TestGetCommand_MissingArgs_ReturnsError(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	root := NewRootCommand()
 	var buf bytes.Buffer
@@ -171,7 +163,6 @@ func TestGetCommand_MissingArgs_ReturnsError(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", "http://localhost:9999",
-		"--api-ticket", "test-ticket",
 		"get",
 	})
 
@@ -184,9 +175,7 @@ func TestGetCommand_MissingArgs_ReturnsError(t *testing.T) {
 // 下载目标名称从解析后的远端路径中提取，而非原始路径字符串；
 // 确保含资源域前缀但无前导斜杠的路径（如 "public:file.bin"）能正确派生出文件名。
 func TestGetCommand_DefaultLocalName_DerivedFromResolvedPath(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -225,7 +214,6 @@ func TestGetCommand_DefaultLocalName_DerivedFromResolvedPath(t *testing.T) {
 	//   修复后：解析路径得 /remote-name.bin，path.Base 取得 "remote-name.bin"
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"get", "public:remote-name.bin", // 无本地目标路径
 	})
 
@@ -243,9 +231,7 @@ func TestGetCommand_DefaultLocalName_DerivedFromResolvedPath(t *testing.T) {
 // TestGetCommand_DefaultLocalName_RejectsUnsafeRootPath 验证当远端路径无法推导安全默认文件名时，
 // get 命令会要求用户显式指定本地目标路径。
 func TestGetCommand_DefaultLocalName_RejectsUnsafeRootPath(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -268,7 +254,6 @@ func TestGetCommand_DefaultLocalName_RejectsUnsafeRootPath(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"get", "public:/",
 	})
 

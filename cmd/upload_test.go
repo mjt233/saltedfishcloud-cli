@@ -14,9 +14,7 @@ import (
 
 // TestUploadCommand_MissingArgs_ReturnsError 验证 upload 命令在缺少参数时返回错误。
 func TestUploadCommand_MissingArgs_ReturnsError(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	root := NewRootCommand()
 	var buf bytes.Buffer
@@ -24,7 +22,6 @@ func TestUploadCommand_MissingArgs_ReturnsError(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", "http://localhost:9999",
-		"--api-ticket", "test-ticket",
 		"upload", // 缺少 localPath 和 remoteResourcePath
 	})
 
@@ -36,9 +33,7 @@ func TestUploadCommand_MissingArgs_ReturnsError(t *testing.T) {
 // TestUploadCommand_SingleFile_MakesUploadRequest 验证 upload 命令对单个文件执行时，
 // 向后端发出正确的上传请求，且文件内容与本地文件一致。
 func TestUploadCommand_SingleFile_MakesUploadRequest(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	uploadCalled := false
 	var gotPath, gotFileName string
@@ -74,7 +69,6 @@ func TestUploadCommand_SingleFile_MakesUploadRequest(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"upload", localFile, "public:/remote/dest.txt",
 	})
 
@@ -99,9 +93,7 @@ func TestUploadCommand_SingleFile_MakesUploadRequest(t *testing.T) {
 // TestUploadCommand_Directory_CreatesDirsAndUploadsFiles 验证 upload 命令对目录执行时，
 // 递归调用 mkdir 创建远端子目录并上传所有文件。
 func TestUploadCommand_Directory_CreatesDirsAndUploadsFiles(t *testing.T) {
-	apiTicket = ""
-	serviceURL = ""
-	t.Cleanup(func() { apiTicket = ""; serviceURL = "" })
+	isolateOAuthConfig(t)
 
 	var mkdirNames []string
 	var uploadedFiles []string
@@ -143,7 +135,6 @@ func TestUploadCommand_Directory_CreatesDirsAndUploadsFiles(t *testing.T) {
 	root.SetErr(&buf)
 	root.SetArgs([]string{
 		"--service-url", srv.URL,
-		"--api-ticket", "test-ticket",
 		"upload", localDir, "public:/dest",
 	})
 

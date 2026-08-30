@@ -7,19 +7,18 @@
 
 目标是从 README 中的 CLI 能力反推实现时需要接入的开放接口，并标明各命令依赖关系、权限范围和可落地方式。
 
-当前实现前提已经简化：CLI 暂不实现 OAuth 授权码流程，而是由用户手动提供永久有效的 ApiTicket。
+认证方式：CLI 仅通过 OIDC 设备授权流程（`sfc-cli login`）引导用户完成登录并持久化令牌。
 
 ## 1. 认证与调用约定
 
-CLI 暂不负责获取 ApiTicket，启动前由用户手动提供永久有效的 ApiTicket。业务接口统一要求：
+CLI 仅使用 OAuth 登录态作为认证来源。业务接口统一要求：
 
 ```http
-Authorization: Bearer {api_ticket}
+Authorization: Bearer {access_token}
 Content-Type: application/json
 ```
 
-> 注意：当前后端开放接口已迁移至 OIDC access token 鉴权，仅接受标准的 `Bearer` 方案；
-> 旧文档中的 `Authorization: ApiTicket {api_ticket}` 方案不再被后端接受，CLI 已同步改为发送 `Bearer`。
+> 注意：当前后端开放接口使用 OIDC access token 鉴权，仅接受标准的 `Bearer` 方案。
 
 返回体约定：
 
@@ -27,12 +26,15 @@ Content-Type: application/json
 - `/api/hello/feature` 为匿名接口，返回值不走 `data` 包装。
 - `/api/openApi/diskFile/download/v1` 直接返回二进制文件流，不适用 JSON 包装规则。
 
-当前 CLI 的最小认证链路如下：
+当前 CLI 的认证链路如下：
 
-1. 用户在 CLI 外部自行申请并保存永久有效的 ApiTicket
-2. CLI 从命令行参数、环境变量或配置文件读取 `apiTicket`
-3. 如需访问私人网盘，调用 `GET /api/openApi/user/profile/v1` 获取授权用户 ID
-4. 携带 ApiTicket 调用开放接口
+1. `GET /.well-known/openid-configuration` 自动发现 `device_authorization_endpoint` 与 `token_endpoint`
+2. `POST {device_authorization_endpoint}` 携带 `client_id`、`scope`，获得 `device_code`、`user_code`、`verification_uri` 等
+3. 用户在浏览器访问验证页面并确认授权
+4. CLI 按 `interval` 轮询 `POST {token_endpoint}`（`grant_type=urn:ietf:params:oauth:grant-type:device_code`），处理 `authorization_pending` / `slow_down`，获得 `access_token` + `refresh_token` 后写入配置文件
+5. 令牌过期时 CLI 自动用 `refresh_token` 换新并回写；HTTP 401 时强制刷新并重试一次
+6. 如需访问私人网盘，调用 `GET /api/openApi/user/profile/v1` 获取授权用户 ID
+7. 携带令牌调用开放接口
 
 ## 2. CLI 开发需要的接口清单
 
@@ -40,7 +42,10 @@ Content-Type: application/json
 
 | 用途 | 接口 | 方法 | 关键参数 | 备注 |
 | --- | --- | --- | --- | --- |
-| 获取授权用户基本信息 | `/api/openApi/user/profile/v1` | `GET` | 无 | 需要 `profile` 权限；CLI 可用返回的 `id` 作为私人网盘 `uid` |
+| OIDC 端点发现 | `/.well-known/openid-configuration` | `GET` | 无 | 返回 `device_authorization_endpoint`、`token_endpoint` 等端点，CLI 不硬编码路径 |
+| 申请设备码 | `{device_authorization_endpoint}` | `POST` | `client_id`、`scope` | 公共客户端（认证方式 `none`）仅需 `client_id`；返回 `device_code`、`user_code`、`verification_uri`、`interval`、`expires_in` |
+| 轮询/刷新令牌 | `{token_endpoint}` | `POST` | `grant_type=urn:ietf:params:oauth:grant-type:device_code` + `device_code` + `client_id`；或 `grant_type=refresh_token` + `refresh_token` + `client_id` | 设备授权换票与刷新令牌共用此端点；标准 OAuth 错误格式 |
+| 获取授权用户基本信息 | `/api/openApi/user/profile/v1` | `GET` | 无 | 需要 `profile` 权限；CLI 可用返回的 `id` 作为私人网盘 `uid`，`username` 用于登录确认展示 |
 
 ### 2.2 非授权公共接口
 
@@ -110,20 +115,20 @@ README 定义了 3 个资源域：
 - `version`
 - `remote-version`
 
-## 6. ApiTicket 权限要求
+## 6. 令牌权限（scope）要求
 
-虽然 CLI 暂不实现 OAuth 流程，但用户手动提供的永久 ApiTicket 至少需要覆盖以下 scope：
+`login` 获得的令牌至少需要覆盖以下 scope：
 
 - `profile`
 - `storage_read`
 - `storage_write`
 
-如果 CLI 只操作公共网盘，可按需降低 scope；但 README 当前目标包含私人网盘，因此 `profile` 实际上已成为必要依赖。
+`login` 命令默认请求以上范围，可通过 `--scope` 参数覆盖；如果 CLI 只操作公共网盘，可按需降低 scope，但 README 当前目标包含私人网盘，因此 `profile` 实际上已成为必要依赖。
 
 ## 7. 开发时的关键注意事项
 
-1. CLI 当前只接受用户手动提供的永久 ApiTicket，不负责申请或刷新票据。
-2. 业务接口统一通过 `Authorization: Bearer {token}` 鉴权；配置项 `apiTicket` 的值即为携带的 token（当前后端要求 OIDC access token）。
+1. CLI 仅通过 OIDC 设备授权流程（`sfc-cli login`，public client）获取令牌。
+2. 业务接口统一通过 `Authorization: Bearer {token}` 鉴权；配置项 `accessToken` 即为携带的 token。
 3. 私人网盘操作依赖 `profile` 接口返回的用户 `id` 作为后续存储接口的 `uid`。
 4. 目录上传和目录下载都不是单独接口能力，需要 CLI 分别递归组合 `mkdir + upload` 与 `fileList + download`。
 5. 删除、复制、移动、重命名都依赖“目录路径 + 文件名”的参数拆分，CLI 需要统一的远程路径解析逻辑。

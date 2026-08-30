@@ -5,7 +5,6 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/mjt233/saltedfishcloud-cli/internal/client"
 	"github.com/mjt233/saltedfishcloud-cli/internal/config"
 	"github.com/mjt233/saltedfishcloud-cli/internal/service"
 	"github.com/spf13/cobra"
@@ -27,7 +26,7 @@ func newRmCommand() *cobra.Command {
 			}
 
 			// 构造服务依赖图
-			cli := client.NewAPIClient(cfg.ServiceURL, cfg.APITicket)
+			cli := newAPIClientFromConfig(cfg)
 			userSvc := service.NewUserService(cli)
 			paths := service.NewPathService(userSvc.PrivateUID)
 			diskSvc := service.NewDiskFileService(cli, paths)

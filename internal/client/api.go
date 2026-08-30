@@ -17,25 +17,58 @@ import (
 	"time"
 )
 
+// TokenSource 提供 Bearer 令牌的来源抽象。
+// 每次请求前调用 Token 获取当前令牌，静态凭据与可刷新的 OAuth 令牌源均实现此接口。
+type TokenSource interface {
+	// Token 返回当前可用的 Bearer 令牌；不可用时返回错误（如未登录）。
+	Token() (string, error)
+}
+
+// RefreshableTokenSource 在令牌被服务端拒绝（HTTP 401）时支持强制刷新。
+// APIClient 收到 401 时若令牌源实现了该接口，会刷新令牌并重试一次请求。
+type RefreshableTokenSource interface {
+	TokenSource
+	// RefreshToken 强制刷新令牌并返回新的 Bearer 令牌。
+	RefreshToken() (string, error)
+}
+
+// staticTokenSource 是静态令牌的简单令牌源实现，适用于手动提供的长期凭据。
+type staticTokenSource struct {
+	// token 是固定的 Bearer 令牌。
+	token string
+}
+
+// Token 返回构造时注入的静态令牌，永不失败。
+func (s staticTokenSource) Token() (string, error) {
+	return s.token, nil
+}
+
 // APIClient 持有与咸鱼云服务通信所需的基础配置和可复用 HTTP 客户端。
 type APIClient struct {
 	// baseURL 是服务根地址，已去除末尾斜杠。
 	baseURL string
-	// apiTicket 是用于 Authorization 头的永久有效凭据。
-	apiTicket string
+	// tokenSource 是 Bearer 令牌来源，nil 时请求不携带鉴权头。
+	tokenSource TokenSource
 	// httpClient 是底层 HTTP 客户端，支持外部注入以便测试替换。
 	httpClient *http.Client
 }
 
-// NewAPIClient 构造一个 APIClient 实例。
-// baseURL 会被规范化（去除末尾斜杠）；apiTicket 为空时请求不携带鉴权头。
+// NewAPIClient 构造一个使用静态令牌的 APIClient 实例。
+// baseURL 会被规范化（去除末尾斜杠）；token 为空时请求不携带鉴权头。
 // 默认超时时间为 30 秒，防止请求长时间挂起。
-func NewAPIClient(baseURL, apiTicket string) *APIClient {
+func NewAPIClient(baseURL, token string) *APIClient {
+	return NewAPIClientWithTokenSource(baseURL, staticTokenSource{token: token})
+}
+
+// NewAPIClientWithTokenSource 构造一个使用外部令牌源的 APIClient 实例。
+// 令牌源为 nil 时请求不携带鉴权头；令牌源实现 RefreshableTokenSource 时，
+// 收到 HTTP 401 会自动刷新令牌并重试一次请求。
+func NewAPIClientWithTokenSource(baseURL string, tokenSource TokenSource) *APIClient {
 	// 去除末尾斜杠，防止拼接路径时产生双斜杠
 	normalizedURL := strings.TrimRight(baseURL, "/")
 	return &APIClient{
-		baseURL:   normalizedURL,
-		apiTicket: apiTicket,
+		baseURL:     normalizedURL,
+		tokenSource: tokenSource,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -67,13 +100,71 @@ type apiEnvelope struct {
 	Msg          string          `json:"msg"`
 }
 
-// addAuthHeader 在请求上注入鉴权头（若 apiTicket 非空）。
+// addAuthHeader 在请求上注入鉴权头（若令牌源可用且令牌非空）。
 // 当前咸鱼云后端的开放接口通过 OIDC access token 鉴权，
-// 使用标准的 `Authorization: Bearer {token}` 方案（`ApiTicket` 方案已不被后端接受）。
-func (c *APIClient) addAuthHeader(req *http.Request) {
-	if c.apiTicket != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiTicket)
+// 使用标准的 `Authorization: Bearer {token}` 方案。
+// 令牌源获取令牌失败（如未登录、刷新失败）时返回错误。
+func (c *APIClient) addAuthHeader(req *http.Request) error {
+	if c.tokenSource == nil {
+		return nil
 	}
+	token, err := c.tokenSource.Token()
+	if err != nil {
+		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return nil
+}
+
+// sendRequest 注入鉴权头后通过指定客户端发起请求，返回成功建立的响应。
+func (c *APIClient) sendRequest(httpClient *http.Client, req *http.Request) (*http.Response, error) {
+	// 注入鉴权头
+	if err := c.addAuthHeader(req); err != nil {
+		return nil, err
+	}
+
+	// 发起请求
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http request failed: %w [%s]", err, req.URL)
+	}
+	return resp, nil
+}
+
+// retryAfterUnauthorized 在收到 401 响应时处理令牌刷新与请求重试：
+// 令牌源不支持刷新时原样返回响应（维持原有错误行为）；
+// 支持刷新时强制刷新令牌并重发一次请求，重试后的响应交由调用方继续处理。
+// 刷新失败或请求不可重发（流式上传无 GetBody）时返回带指引的错误。
+func (c *APIClient) retryAfterUnauthorized(httpClient *http.Client, req *http.Request, resp *http.Response) (*http.Response, error) {
+	// 仅可刷新的令牌源触发重试流程
+	refreshable, ok := c.tokenSource.(RefreshableTokenSource)
+	if !ok {
+		return resp, nil
+	}
+
+	// 强制刷新令牌；失败说明登录态已失效，提示重新登录
+	if _, err := refreshable.RefreshToken(); err != nil {
+		return nil, fmt.Errorf("authentication failed and token refresh error: %w; run `sfc-cli login` to re-authenticate [%s]", err, req.URL)
+	}
+
+	// 流式请求体无法重建（无 GetBody）时放弃重试，保持原 401 行为
+	retryReq := req.Clone(req.Context())
+	if req.Body != nil {
+		if req.GetBody == nil {
+			return nil, fmt.Errorf("authentication failed (401) on non-retryable streaming request; run `sfc-cli login` to re-authenticate [%s]", req.URL)
+		}
+		body, err := req.GetBody()
+		if err != nil {
+			return nil, fmt.Errorf("failed to rebuild request body for retry: %w [%s]", err, req.URL)
+		}
+		retryReq.Body = body
+	}
+
+	// 丢弃旧响应并携带新令牌重发请求
+	resp.Body.Close()
+	return c.sendRequest(httpClient, retryReq)
 }
 
 // buildURL 将路径与查询参数拼接为完整请求 URL。
@@ -103,14 +194,20 @@ func (c *APIClient) doJSONRequest(req *http.Request, out any) error {
 
 // doRequestWithClient 使用指定底层 http.Client 执行请求并解包标准信封响应到 out。
 // 是 doJSONRequest 的核心实现，允许上传等场景替换为无全局超时的客户端。
+// 收到 HTTP 401 且令牌源支持刷新时，会刷新令牌并重试一次请求。
 func (c *APIClient) doRequestWithClient(httpClient *http.Client, req *http.Request, out any) error {
-	// 注入鉴权头
-	c.addAuthHeader(req)
-
 	// 发起请求
-	resp, err := httpClient.Do(req)
+	resp, err := c.sendRequest(httpClient, req)
 	if err != nil {
-		return fmt.Errorf("http request failed: %w [%s]", err, req.URL)
+		return err
+	}
+
+	// 401 时尝试刷新令牌并重试一次；不可刷新或重试失败时维持原有错误行为
+	if resp.StatusCode == http.StatusUnauthorized {
+		resp, err = c.retryAfterUnauthorized(httpClient, req, resp)
+		if err != nil {
+			return err
+		}
 	}
 	defer resp.Body.Close()
 
@@ -343,18 +440,23 @@ func (c *APIClient) Download(ctx context.Context, path string, query url.Values)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	// 注入鉴权头
-	c.addAuthHeader(req)
-
 	// 克隆 HTTP 客户端并将超时设为 0，避免全局默认超时中断大文件流式下载；
 	// 超时控制改由调用方通过 context 实现。
 	streamClient := *c.httpClient
 	streamClient.Timeout = 0
 
-	// 直接返回响应，不进行 JSON 解析
-	resp, err := streamClient.Do(req)
+	// 注入鉴权头并发起请求，返回原始响应不进行 JSON 解析
+	resp, err := c.sendRequest(&streamClient, req)
 	if err != nil {
-		return nil, fmt.Errorf("http request failed: %w [%s]", err, req.URL)
+		return nil, err
+	}
+
+	// 401 时尝试刷新令牌并重试一次（GET 无请求体，可安全重发）
+	if resp.StatusCode == http.StatusUnauthorized {
+		resp, err = c.retryAfterUnauthorized(&streamClient, req, resp)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := checkHTTPStatus(resp); err != nil {
 		resp.Body.Close()
