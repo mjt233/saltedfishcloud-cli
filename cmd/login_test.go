@@ -79,6 +79,13 @@ func TestRunLogin_DeviceFlowEndToEnd(t *testing.T) {
 			if got := r.PostForm.Get("scope"); got != "profile storage_read" {
 				t.Fatalf("scope = %q, want %q", got, "profile storage_read")
 			}
+			// 设备流应始终附带 PKCE S256
+			if got := r.PostForm.Get("code_challenge_method"); got != "S256" {
+				t.Fatalf("code_challenge_method = %q, want %q", got, "S256")
+			}
+			if got := r.PostForm.Get("code_challenge"); got == "" {
+				t.Fatal("code_challenge should be present")
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"device_code":               "dc-1",
 				"user_code":                 "ABCD-WXYZ",
@@ -91,6 +98,10 @@ func TestRunLogin_DeviceFlowEndToEnd(t *testing.T) {
 			_ = r.ParseForm()
 			if got := r.PostForm.Get("grant_type"); got != "urn:ietf:params:oauth:grant-type:device_code" {
 				t.Fatalf("grant_type = %q", got)
+			}
+			// 换票应回传与申请阶段配对的 code_verifier
+			if got := r.PostForm.Get("code_verifier"); got == "" {
+				t.Fatal("code_verifier should be present on token poll")
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"access_token":  "at-1",

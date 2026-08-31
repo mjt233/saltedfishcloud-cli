@@ -2,6 +2,8 @@ package oauth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,9 +13,11 @@ import (
 	"time"
 )
 
-// TestRequestDeviceCode_SendsFormAndParses 验证设备授权请求携带正确的表单参数并解析响应。
+// TestRequestDeviceCode_SendsFormAndParses 验证设备授权请求携带正确的表单参数并解析响应，
+// 包括始终附带的 PKCE S256 参数，以及返回结构中保存的 code_verifier。
 func TestRequestDeviceCode_SendsFormAndParses(t *testing.T) {
 	var gotClientID, gotScope, gotContentType string
+	var gotChallenge, gotMethod string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("expected POST, got %s", r.Method)
@@ -24,6 +28,8 @@ func TestRequestDeviceCode_SendsFormAndParses(t *testing.T) {
 		}
 		gotClientID = r.PostForm.Get("client_id")
 		gotScope = r.PostForm.Get("scope")
+		gotChallenge = r.PostForm.Get("code_challenge")
+		gotMethod = r.PostForm.Get("code_challenge_method")
 		_, _ = w.Write([]byte(`{
 			"device_code":"dc-1","user_code":"ABCD-WXYZ",
 			"verification_uri":"https://sfc/oauth/device",
@@ -43,6 +49,21 @@ func TestRequestDeviceCode_SendsFormAndParses(t *testing.T) {
 	}
 	if gotScope != "profile storage_read" {
 		t.Fatalf("scope = %q, want %q", gotScope, "profile storage_read")
+	}
+	if gotMethod != "S256" {
+		t.Fatalf("code_challenge_method = %q, want %q", gotMethod, "S256")
+	}
+	if gotChallenge == "" {
+		t.Fatal("code_challenge should be sent")
+	}
+	if da.CodeVerifier == "" {
+		t.Fatal("CodeVerifier should be retained for token polling")
+	}
+	// 校验 challenge 与本地 verifier 的 S256 对应关系
+	sum := sha256.Sum256([]byte(da.CodeVerifier))
+	wantChallenge := base64.RawURLEncoding.EncodeToString(sum[:])
+	if gotChallenge != wantChallenge {
+		t.Fatalf("code_challenge = %q, want S256(%s) = %q", gotChallenge, da.CodeVerifier, wantChallenge)
 	}
 	if !strings.HasPrefix(gotContentType, "application/x-www-form-urlencoded") {
 		t.Fatalf("unexpected content type: %q", gotContentType)
@@ -75,8 +96,10 @@ func TestRequestDeviceCode_OAuthError(t *testing.T) {
 }
 
 // TestWaitForAuthorization_PendingThenSuccess 验证轮询在 authorization_pending 后继续，
-// 并在服务端返回令牌时成功结束；同时验证每次轮询的等待间隔符合响应给出的 interval。
+// 并在服务端返回令牌时成功结束；同时验证每次轮询的等待间隔符合响应给出的 interval，
+// 以及换票请求携带申请阶段保存的 code_verifier。
 func TestWaitForAuthorization_PendingThenSuccess(t *testing.T) {
+	const wantVerifier = "test-code-verifier-value-xxxxxxxx"
 	var polls int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		polls++
@@ -91,6 +114,9 @@ func TestWaitForAuthorization_PendingThenSuccess(t *testing.T) {
 		}
 		if got := r.PostForm.Get("client_id"); got != "app-1" {
 			t.Fatalf("client_id = %q, want %q", got, "app-1")
+		}
+		if got := r.PostForm.Get("code_verifier"); got != wantVerifier {
+			t.Fatalf("code_verifier = %q, want %q", got, wantVerifier)
 		}
 		if polls == 1 {
 			w.WriteHeader(http.StatusBadRequest)
@@ -109,7 +135,7 @@ func TestWaitForAuthorization_PendingThenSuccess(t *testing.T) {
 	sleep := func(d time.Duration) { waits = append(waits, d) }
 
 	endpoints := &Endpoints{DeviceAuthorizationEndpoint: srv.URL, TokenEndpoint: srv.URL}
-	da := &DeviceAuthorization{DeviceCode: "dc-1", UserCode: "CODE", Interval: 3}
+	da := &DeviceAuthorization{DeviceCode: "dc-1", UserCode: "CODE", Interval: 3, CodeVerifier: wantVerifier}
 	ts, err := WaitForAuthorization(context.Background(), nil, endpoints, "app-1", da, sleep)
 	if err != nil {
 		t.Fatalf("WaitForAuthorization returned error: %v", err)
@@ -124,6 +150,38 @@ func TestWaitForAuthorization_PendingThenSuccess(t *testing.T) {
 		if d != 3*time.Second {
 			t.Fatalf("wait = %v, want 3s", d)
 		}
+	}
+}
+
+// TestGeneratePKCE 验证 PKCE 生成结果满足 RFC 7636：verifier 长度、challenge 为 S256。
+func TestGeneratePKCE(t *testing.T) {
+	verifier, challenge, err := generatePKCE()
+	if err != nil {
+		t.Fatalf("generatePKCE returned error: %v", err)
+	}
+	if len(verifier) != 43 {
+		t.Fatalf("code_verifier length = %d, want 43", len(verifier))
+	}
+	// base64url 无填充字符集校验（字母数字与 -_）
+	for _, c := range verifier {
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
+			continue
+		}
+		t.Fatalf("code_verifier contains invalid character %q", c)
+	}
+	sum := sha256.Sum256([]byte(verifier))
+	want := base64.RawURLEncoding.EncodeToString(sum[:])
+	if challenge != want {
+		t.Fatalf("code_challenge = %q, want %q", challenge, want)
+	}
+
+	// 连续两次生成应得到不同的 verifier（高熵）
+	v2, _, err := generatePKCE()
+	if err != nil {
+		t.Fatalf("second generatePKCE returned error: %v", err)
+	}
+	if verifier == v2 {
+		t.Fatal("two consecutive code_verifiers should differ")
 	}
 }
 

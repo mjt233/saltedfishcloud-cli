@@ -111,10 +111,10 @@ type APIClient struct {
 | 文件 | 职责 |
 | --- | --- |
 | `discovery.go` | 请求 `{serviceUrl}/.well-known/openid-configuration` 自动发现设备授权与令牌端点，不硬编码路径 |
-| `device.go` | 申请设备码（`POST device_authorization_endpoint`）、按 `interval` 轮询换票（处理 `authorization_pending`/`slow_down`/终止性错误与设备码过期）、`refresh_token` 换新 |
+| `device.go` | 申请设备码（`POST device_authorization_endpoint`，附带 PKCE S256）、按 `interval` 轮询换票（携带 `code_verifier`，处理 `authorization_pending`/`slow_down`/终止性错误与设备码过期）、`refresh_token` 换新 |
 | `token_source.go` | 实现 client 层的 `TokenSource`/`RefreshableTokenSource`：令牌临近过期自动刷新并回写配置；刷新令牌轮换时采用新值 |
 
-`login` 命令流程：端点发现 → 申请设备码 → 输出验证地址与用户码到控制台 → 轮询换票 → 持久化 → 调用 profile 接口确认身份。
+`login` 命令流程：端点发现 → 生成 PKCE → 申请设备码 → 输出验证地址与用户码到控制台 → 轮询换票（附 `code_verifier`）→ 持久化 → 调用 profile 接口确认身份。
 
 ### 3.4 路径解析 (`internal/service/path.go`)
 

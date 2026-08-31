@@ -2,6 +2,9 @@ package oauth
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,7 +30,12 @@ var timeNow = time.Now
 // defaultDeviceCodeLifetime 是设备授权响应未给出 expires_in 时的默认有效时长。
 const defaultDeviceCodeLifetime = 10 * time.Minute
 
-// DeviceAuthorization 是设备授权端点的响应结构（RFC 8628 §3.2）。
+// pkceCodeVerifierBytes 是生成 code_verifier 时读取的随机字节数。
+// 32 字节经 base64url 无填充编码后为 43 个字符，满足 RFC 7636 §4.1 的 43–128 长度要求。
+const pkceCodeVerifierBytes = 32
+
+// DeviceAuthorization 是设备授权端点的响应结构（RFC 8628 §3.2），
+// 并附带本端生成的 PKCE 状态（RFC 7636），不来自服务端 JSON。
 type DeviceAuthorization struct {
 	// DeviceCode 是设备确认码，轮询换票时携带。
 	DeviceCode string `json:"device_code"`
@@ -41,6 +49,8 @@ type DeviceAuthorization struct {
 	ExpiresIn int64 `json:"expires_in"`
 	// Interval 是轮询令牌端点的最小间隔秒数。
 	Interval int `json:"interval"`
+	// CodeVerifier 是申请设备码时本地生成的 PKCE 校验串，仅用于后续换票，不参与 JSON 反序列化。
+	CodeVerifier string `json:"-"`
 }
 
 // TokenSet 是令牌端点成功响应的结构（RFC 6749 §5.1）。
@@ -75,9 +85,21 @@ func (e *OAuthError) Error() string {
 
 // RequestDeviceCode 调用设备授权端点申请设备码与用户码。
 // scope 为空时不携带 scope 参数（由服务端决定默认授权范围）。
+// 始终附带 PKCE S256（RFC 7636）：生成 code_verifier，发送 code_challenge 与 code_challenge_method，
+// 并将 code_verifier 保存在返回结构中供后续换票使用。
 func RequestDeviceCode(ctx context.Context, hc *http.Client, endpoints *Endpoints, clientID, scope string) (*DeviceAuthorization, error) {
-	// 组装表单参数：公共客户端仅需 client_id 与 scope
-	form := url.Values{"client_id": {clientID}}
+	// 生成本次设备授权绑定的 PKCE 参数
+	verifier, challenge, err := generatePKCE()
+	if err != nil {
+		return nil, err
+	}
+
+	// 组装表单参数：公共客户端携带 client_id、scope 与 PKCE challenge
+	form := url.Values{
+		"client_id":             {clientID},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}
 	if scope != "" {
 		form.Set("scope", scope)
 	}
@@ -92,7 +114,7 @@ func RequestDeviceCode(ctx context.Context, hc *http.Client, endpoints *Endpoint
 		return nil, oauthErrorFromResponse(resp)
 	}
 
-	// 解析设备授权响应
+	// 解析设备授权响应，并挂上本地 code_verifier（不来自服务端）
 	var da DeviceAuthorization
 	if err := json.NewDecoder(resp.Body).Decode(&da); err != nil {
 		return nil, fmt.Errorf("failed to decode device authorization response: %w [%s]", err, endpoints.DeviceAuthorizationEndpoint)
@@ -100,6 +122,7 @@ func RequestDeviceCode(ctx context.Context, hc *http.Client, endpoints *Endpoint
 	if da.DeviceCode == "" || da.UserCode == "" {
 		return nil, fmt.Errorf("device authorization response missing device_code or user_code [%s]", endpoints.DeviceAuthorizationEndpoint)
 	}
+	da.CodeVerifier = verifier
 	return &da, nil
 }
 
@@ -143,7 +166,7 @@ func WaitForAuthorization(ctx context.Context, hc *http.Client, endpoints *Endpo
 			return nil, fmt.Errorf("device code expired before authorization was completed; please run login again")
 		}
 
-		ts, err := pollTokenOnce(ctx, hc, endpoints, clientID, da.DeviceCode)
+		ts, err := pollTokenOnce(ctx, hc, endpoints, clientID, da.DeviceCode, da.CodeVerifier)
 		if err == nil {
 			return ts, nil
 		}
@@ -197,13 +220,32 @@ func RefreshToken(ctx context.Context, hc *http.Client, endpoints *Endpoints, cl
 	return &ts, nil
 }
 
+// generatePKCE 按 RFC 7636 生成 code_verifier 与 S256 code_challenge。
+// code_verifier 为 43 字符的 base64url 无填充高熵串；
+// code_challenge 为 BASE64URL-ENCODE(SHA256(code_verifier))（无填充）。
+func generatePKCE() (verifier, challenge string, err error) {
+	raw := make([]byte, pkceCodeVerifierBytes)
+	if _, err := rand.Read(raw); err != nil {
+		return "", "", fmt.Errorf("failed to generate PKCE code_verifier: %w", err)
+	}
+	verifier = base64.RawURLEncoding.EncodeToString(raw)
+	sum := sha256.Sum256([]byte(verifier))
+	challenge = base64.RawURLEncoding.EncodeToString(sum[:])
+	return verifier, challenge, nil
+}
+
 // pollTokenOnce 执行一次设备授权换票请求，成功返回令牌集合，
 // 失败时若服务端返回标准 OAuth 错误则返回 *OAuthError 供调用方分支处理。
-func pollTokenOnce(ctx context.Context, hc *http.Client, endpoints *Endpoints, clientID, deviceCode string) (*TokenSet, error) {
+// codeVerifier 非空时按 RFC 7636 附带 code_verifier（与申请设备码时的 challenge 配对）。
+func pollTokenOnce(ctx context.Context, hc *http.Client, endpoints *Endpoints, clientID, deviceCode, codeVerifier string) (*TokenSet, error) {
 	form := url.Values{
 		"grant_type":  {deviceCodeGrantType},
 		"device_code": {deviceCode},
 		"client_id":   {clientID},
+	}
+	// 申请阶段启用了 PKCE 时，换票必须回传同一 code_verifier
+	if codeVerifier != "" {
+		form.Set("code_verifier", codeVerifier)
 	}
 	resp, err := postForm(ctx, hc, endpoints.TokenEndpoint, form)
 	if err != nil {

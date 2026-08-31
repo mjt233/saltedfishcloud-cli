@@ -29,12 +29,13 @@ Content-Type: application/json
 当前 CLI 的认证链路如下：
 
 1. `GET /.well-known/openid-configuration` 自动发现 `device_authorization_endpoint` 与 `token_endpoint`
-2. `POST {device_authorization_endpoint}` 携带 `client_id`、`scope`，获得 `device_code`、`user_code`、`verification_uri` 等
-3. 用户在浏览器访问验证页面并确认授权
-4. CLI 按 `interval` 轮询 `POST {token_endpoint}`（`grant_type=urn:ietf:params:oauth:grant-type:device_code`），处理 `authorization_pending` / `slow_down`，获得 `access_token` + `refresh_token` 后写入配置文件
-5. 令牌过期时 CLI 自动用 `refresh_token` 换新并回写；HTTP 401 时强制刷新并重试一次
-6. 如需访问私人网盘，调用 `GET /api/openApi/user/profile/v1` 获取授权用户 ID
-7. 携带令牌调用开放接口
+2. CLI 本地生成 PKCE（RFC 7636）`code_verifier` 与 S256 `code_challenge`
+3. `POST {device_authorization_endpoint}` 携带 `client_id`、`scope`、`code_challenge`、`code_challenge_method=S256`，获得 `device_code`、`user_code`、`verification_uri` 等
+4. 用户在浏览器访问验证页面并确认授权
+5. CLI 按 `interval` 轮询 `POST {token_endpoint}`（`grant_type=urn:ietf:params:oauth:grant-type:device_code` + `device_code` + `client_id` + `code_verifier`），处理 `authorization_pending` / `slow_down`，获得 `access_token` + `refresh_token` 后写入配置文件
+6. 令牌过期时 CLI 自动用 `refresh_token` 换新并回写；HTTP 401 时强制刷新并重试一次
+7. 如需访问私人网盘，调用 `GET /api/openApi/user/profile/v1` 获取授权用户 ID
+8. 携带令牌调用开放接口
 
 ## 2. CLI 开发需要的接口清单
 
@@ -43,8 +44,8 @@ Content-Type: application/json
 | 用途 | 接口 | 方法 | 关键参数 | 备注 |
 | --- | --- | --- | --- | --- |
 | OIDC 端点发现 | `/.well-known/openid-configuration` | `GET` | 无 | 返回 `device_authorization_endpoint`、`token_endpoint` 等端点，CLI 不硬编码路径 |
-| 申请设备码 | `{device_authorization_endpoint}` | `POST` | `client_id`、`scope` | 公共客户端（认证方式 `none`）仅需 `client_id`；返回 `device_code`、`user_code`、`verification_uri`、`interval`、`expires_in` |
-| 轮询/刷新令牌 | `{token_endpoint}` | `POST` | `grant_type=urn:ietf:params:oauth:grant-type:device_code` + `device_code` + `client_id`；或 `grant_type=refresh_token` + `refresh_token` + `client_id` | 设备授权换票与刷新令牌共用此端点；标准 OAuth 错误格式 |
+| 申请设备码 | `{device_authorization_endpoint}` | `POST` | `client_id`、`scope`、`code_challenge`、`code_challenge_method=S256` | 公共客户端（认证方式 `none`）+ PKCE；返回 `device_code`、`user_code`、`verification_uri`、`interval`、`expires_in` |
+| 轮询/刷新令牌 | `{token_endpoint}` | `POST` | `grant_type=urn:ietf:params:oauth:grant-type:device_code` + `device_code` + `client_id` + `code_verifier`；或 `grant_type=refresh_token` + `refresh_token` + `client_id` | 设备授权换票与刷新令牌共用此端点；设备换票附带 PKCE `code_verifier`；标准 OAuth 错误格式 |
 | 获取授权用户基本信息 | `/api/openApi/user/profile/v1` | `GET` | 无 | 需要 `profile` 权限；CLI 可用返回的 `id` 作为私人网盘 `uid`，`username` 用于登录确认展示 |
 
 ### 2.2 非授权公共接口
